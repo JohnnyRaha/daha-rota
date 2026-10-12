@@ -318,6 +318,58 @@ const Sheets = (function () {
     }
   }
 
+  // ---------- Trybe ----------
+  // Trybe (try.be) has no file import for rotas; rotas are created through its API. A practitioner's rota there is
+  // a repeating cycle of N weeks made of rules { week_num, weekday, time_from, time_to }, and dated exceptions
+  // ("custom availability") cover leave. This builds exactly those request bodies from four scheduled weeks.
+  // Field names follow the public specification at https://docs.try.be (PractitionerRota, PractitionerCustomAvailability).
+  const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+  function trybe(wk, roles) {
+    const weeks = [0, 1, 2, 3].map(i => D.addDays(wk, 7 * i)), last = D.addDays(wk, 27);
+    const practitioners = [], notScheduled = [];
+    D.state.staff.filter(p => p.skills.some(s => roles.includes(s))).forEach(p => {
+      // bookable windows per week: this person's shifts in the chosen areas, with back-to-back shifts joined
+      const perWeek = weeks.map(w => {
+        const out = [];
+        (D.state.weeks[w] || []).filter(s => s.staffId === p.id && roles.includes(s.role)).sort((a, b) => a.day - b.day || a.start - b.start).forEach(s => {
+          const prev = out[out.length - 1];
+          if (prev && prev.day === s.day && s.start <= prev.end) prev.end = Math.max(prev.end, s.end); else out.push({ day: s.day, start: s.start, end: s.end });
+        });
+        return out;
+      });
+      if (!perWeek.some(w => w.length)) { notScheduled.push(p.name); return; }
+      const key = perWeek.map(w => JSON.stringify(w)), cycle = key.every(k => k === key[0]) ? 1 : key[0] === key[2] && key[1] === key[3] ? 2 : 4;
+      const rules = [];
+      for (let i = 0; i < cycle; i++) perWeek[i].forEach(r => rules.push({ week_num: i + 1, weekday: WEEKDAYS[r.day], time_from: D.hhmm(r.start), time_to: D.hhmm(r.end), offerings: [] }));
+      const treatments = [];
+      weeks.forEach((w, i) => (D.state.weeks[w] || []).filter(s => s.staffId === p.id && s.treatment && i < cycle).forEach(s =>
+        treatments.push({ week_num: i + 1, weekday: WEEKDAYS[s.day], time_from: D.hhmm(s.start), time_to: D.hhmm(s.end), treatment: s.treatment })));
+      practitioners.push({
+        name: p.name, practitioner_id: '',
+        rota: { practitioner_id: '', start_date: wk, end_date: null, scheduling_week_interval: cycle, availability_rules: rules },
+        custom_availability: p.holidays.filter(h => h.to >= wk).map(h => ({ date_time_from: h.from + 'T00:00:00', date_time_to: D.addDays(h.to, 1) + 'T00:00:00', is_available: false })),
+        treatment_specific_windows: treatments
+      });
+    });
+    return {
+      format: 'Trybe practitioner rotas', specification: 'https://docs.try.be', cycle_start: wk, cycle_end: last,
+      how_to_load: [
+        'Fill in practitioner_id (twice per person) with the ID from GET /shop/practitioners.',
+        'POST each "rota" object to /shop/practitioner-rotas.',
+        'POST each "custom_availability" object to /shop/practitioners/{practitionerId}/custom-availability.',
+        'treatment_specific_windows is for reference only: to restrict a window to a treatment in Trybe, add that offering to the matching rule\'s "offerings" list.'
+      ],
+      weeks_without_a_rota: weeks.filter(w => !(D.state.weeks[w] || []).length), not_scheduled: notScheduled, practitioners
+    };
+  }
+  // The same rotas as a flat list, for keying into Trybe's schedule screen by hand.
+  function trybeRows(t) {
+    return [['Practitioner', 'Rota starts', 'Cycle (weeks)', 'Week', 'Weekday', 'From', 'To', 'Treatment']].concat(...t.practitioners.map(p => p.rota.availability_rules.map(r =>
+      [p.name, t.cycle_start, String(p.rota.scheduling_week_interval), String(r.week_num), r.weekday, r.time_from, r.time_to,
+        p.treatment_specific_windows.filter(x => x.week_num === r.week_num && x.weekday === r.weekday && x.time_from >= r.time_from && x.time_to <= r.time_to).map(x => `${x.treatment} ${x.time_from}-${x.time_to}`).join('; ')])),
+      ...t.practitioners.map(p => p.custom_availability.map(c => [p.name, '', '', 'time off', c.date_time_from.slice(0, 10), '', D.addDays(c.date_time_to.slice(0, 10), -1), ''])));
+  }
+
   const SCRIPT = `// Dāha rota export. Paste into Extensions → Apps Script of the Google Sheet that should receive the rota,
 // then Deploy → New deployment → Web app → Execute as: Me, Who has access: Anyone. Copy the web app URL into the rota tool.
 var KEY = '';   // optional: set a password here and enter the same one in the rota tool
@@ -352,5 +404,5 @@ function write(ss, name, rows, wrap) {
 }
 `;
 
-  return { parseCsv, toCsv, toTsv, readXlsx, parseTimes, readWorkbook, readPeople, readAny, fetchSheet, readFile, apply, build, send, shiftLabel, TEMPLATE, SCRIPT };
+  return { parseCsv, toCsv, toTsv, readXlsx, parseTimes, readWorkbook, readPeople, readAny, fetchSheet, readFile, apply, build, send, trybe, trybeRows, shiftLabel, TEMPLATE, SCRIPT };
 })();

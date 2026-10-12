@@ -6,6 +6,7 @@
   const h = m => { const v = D.hrs(m); return (Number.isInteger(v) ? v : v.toFixed(1)) + ' h'; };
   const span = (a, b) => `${D.hhmm(a)}–${D.hhmm(b)}`;
   const first = p => p.name.split(' ')[0];
+  const trybeRoles = () => (D.state.settings.trybeRoles || 'therapy,studio').split(',');
   let wk, tab = 'rota', selected = null, sheetLog = '', rot = 0;
   const days = p => D.daysOf(p, wk);
 
@@ -220,6 +221,14 @@
       <div class="btns"><button class="primary" data-act="send">Send rota to Google Sheet</button><button data-act="copyscript">Copy the script</button></div>
       <details><summary>Show the script</summary><pre>${esc(Sheets.SCRIPT)}</pre></details>
       <p class="hint">Treat the web app URL like a password: anyone who has it can write rota tabs into that sheet. Setting an export key adds a second check.</p></section>
+      <section class="card"><h3>3 · Export for Trybe</h3>
+      <p>Trybe has no spreadsheet import for rotas. A practitioner's rota in Trybe is a repeating cycle of weeks plus dated time off, created on its schedule screen or through its API. This export turns the four weeks starting <b>${D.nice(wk)}</b> into exactly that shape.</p>
+      ${(() => { const t = Sheets.trybe(wk, trybeRoles()); return `<p>${t.practitioners.length} practitioner${t.practitioners.length === 1 ? '' : 's'} ready`
+        + (t.weeks_without_a_rota.length ? `. <span class="warn">${t.weeks_without_a_rota.length} of the four weeks ${t.weeks_without_a_rota.length === 1 ? 'has' : 'have'} no rota yet (${t.weeks_without_a_rota.map(D.nice).join(', ')}).</span>` : ', all four weeks scheduled.')
+        + (t.not_scheduled.length ? ` Not on the rota in these weeks: ${t.not_scheduled.map(esc).join(', ')}.` : '') + '</p>'; })()}
+      <label>Who is a bookable practitioner in Trybe<select data-set="trybeRoles"><option value="therapy,studio"${s.trybeRoles === 'therapy,studio' ? ' selected' : ''}>Therapists and studio</option><option value="therapy"${s.trybeRoles === 'therapy' ? ' selected' : ''}>Therapists only</option><option value="foh,cafe,therapy,studio"${s.trybeRoles === 'foh,cafe,therapy,studio' ? ' selected' : ''}>Everyone</option></select></label>
+      <div class="btns"><button data-act="buildfour">Build the rota for all four weeks</button><button class="primary" data-act="trybejson">Download Trybe rota file (JSON)</button><button data-act="trybecsv">Download as a list (CSV)</button></div>
+      <p class="hint">Only shifts in the chosen areas are exported, so time a multi-skilled person spends on front of house or in the café is not offered for bookings. The JSON file needs each person's Trybe practitioner ID filled in before it is loaded; the list is for entering rotas by hand. Treatments are listed for reference, because linking them needs Trybe's own offering IDs.</p></section>
       <section class="card"><h3>Backup</h3><p>Everything is stored in this browser on this computer. Download a backup to move it to another computer or keep a copy.</p>
       <div class="btns"><button data-act="backup">Download backup</button><button data-act="restore">Restore from backup</button><button data-act="sample">Load the sample team</button><button class="danger" data-act="wipe">Clear everything</button></div></section></div>`;
   }
@@ -305,6 +314,13 @@
       catch (e) { toast(e.message, true); }
       return false;
     },
+    buildfour() {
+      let added = 0, left = 0;
+      [0, 1, 2, 3].forEach(i => { const r = E.auto(D.addDays(wk, 7 * i), false); added += r.added; left += r.gaps.length; });
+      toast(`Added ${added} shifts across four weeks.` + (left ? ` ${left} gaps remain; check each week on the Rota tab.` : ' Every week is fully covered.'), left > 0);
+    },
+    trybejson() { download(`daha-trybe-rotas-${wk}.json`, JSON.stringify(Sheets.trybe(wk, trybeRoles()), null, 2), 'application/json'); return false; },
+    trybecsv() { download(`daha-trybe-rotas-${wk}.csv`, '\ufeff' + Sheets.toCsv(Sheets.trybeRows(Sheets.trybe(wk, trybeRoles()))), 'text/csv'); return false; },
     backup() { download(`daha-rota-backup-${D.today()}.json`, JSON.stringify(D.state), 'application/json'); return false; },
     restore() { $('file-backup').click(); return false; },
     sample() { if (confirm('Replace everything with the sample team?')) { D.loadSample(); selected = null; } },
@@ -335,7 +351,7 @@
     $('view').addEventListener('change', e => {
       const el = e.target, p = D.person(selected);
       let redraw = true;
-      if (el.dataset.set) { D.state.settings[el.dataset.set] = el.type === 'number' ? +el.value || 10 : el.type === 'date' ? D.mondayOf(el.value || D.today()) : el.value.trim(); redraw = el.type === 'date'; }
+      if (el.dataset.set) { D.state.settings[el.dataset.set] = el.type === 'number' ? +el.value || 10 : el.type === 'date' ? D.mondayOf(el.value || D.today()) : el.value.trim(); redraw = el.type === 'date' || el.tagName === 'SELECT'; }
       else if (el.dataset.treatlist != null) {
         const list = [...new Set(el.value.split(',').map(x => x.trim()).filter(Boolean))];
         D.state.treatments = list;

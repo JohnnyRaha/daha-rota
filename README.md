@@ -59,6 +59,18 @@ Reading from a link needs the sheet shared as "Anyone with the link can view", w
 
 Anyone with the web app URL can write rota tabs to that sheet, so keep it private; set `KEY` in the script and the same key in the tool for a second check.
 
+## Exporting to Trybe
+
+Trybe (try.be) has no spreadsheet import for rotas. In Trybe a practitioner's rota is a repeating cycle of weeks made of rules (week number, weekday, from, to), with dated "custom availability" for time off, created on its schedule screen or through its API (documented at https://docs.try.be).
+
+**Google Sheets → Export for Trybe** converts the four weeks starting at the week on screen into that shape:
+
+- one rota per practitioner, as a 1, 2 or 4-week cycle depending on how their four weeks repeat, in the request body that `POST /shop/practitioner-rotas` expects;
+- holidays as custom-availability blocks for `POST /shop/practitioners/{practitionerId}/custom-availability`;
+- only shifts in the chosen bookable areas (by default therapists and studio), so front-of-house or café time is not offered for bookings.
+
+Two things have to be added from Trybe itself: each person's practitioner ID, and offering IDs if a window should be limited to particular treatments. The export has not been loaded into a live Trybe account. A CSV version of the same rotas is available for entering them by hand.
+
 ## Files
 
 - `js/data.js` — data model, storage and the sample team

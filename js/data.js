@@ -73,7 +73,7 @@ const Data = (function () {
   // ---------- state ----------
   let state;
   const blank = () => ({ staff: [], needs: defaultNeeds(), weeks: {}, treatments: TREATMENTS.slice(),
-    settings: { sheetUrl: '', scriptUrl: '', scriptKey: '', maxDay: 10, rotationStart: mondayOf(today()) }, nextId: 1 });
+    settings: { sheetUrl: '', scriptUrl: '', scriptKey: '', maxDay: 10, rotationStart: mondayOf(today()), trybeRoles: 'therapy,studio' }, nextId: 1 });
   const newId = () => state.nextId++;
 
   // Fill in anything missing on a person (also upgrades data saved by earlier versions).
