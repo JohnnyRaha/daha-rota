@@ -69,12 +69,15 @@ Trybe (try.be) has no spreadsheet import for rotas. In Trybe a practitioner's ro
 - holidays as custom-availability blocks for `POST /shop/practitioners/{practitionerId}/custom-availability`;
 - only shifts in the chosen bookable areas (by default therapists and studio), so front-of-house or café time is not offered for bookings.
 
-Two things have to be added from Trybe itself: each person's practitioner ID, and offering IDs if a window should be limited to particular treatments. The export has not been loaded into a live Trybe account. A CSV version of the same rotas is available for entering them by hand.
+**Send straight to Trybe.** The same card can connect to Trybe directly. The first time, it asks for a Trybe API token and whether to use the Playground (test) or Live environment. It then looks up each person in Trybe by name, shows their current rota next to the new one, and proposes what to do: create the rota, end the current one the day before and start the new one, or skip. Nothing is sent until you confirm, and existing rotas are ended, not deleted. The token is stored in the browser only (for the session, or on that computer if you choose), separately from the rota data, and is not part of backups.
+
+For the file export, two things have to be added from Trybe itself: each person's practitioner ID, and offering IDs if a window should be limited to particular treatments. Neither the file nor the direct connection has been run against a real Trybe account yet; try the Playground first. A CSV version of the same rotas is available for entering them by hand.
 
 ## Files
 
 - `js/data.js` — data model, storage and the sample team
 - `js/engine.js` — rule checks, gap detection, suggestions, the auto-scheduler and capacity figures
 - `js/sheets.js` — reading sheets and workbooks (including .xlsx), and exporting the rota
+- `js/trybe.js` — the direct connection to Trybe
 - `js/ui.js` — the interface
 - `apps-script.gs` — the script for one-click export

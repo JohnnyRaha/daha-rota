@@ -228,9 +228,73 @@
         + (t.not_scheduled.length ? ` Not on the rota in these weeks: ${t.not_scheduled.map(esc).join(', ')}.` : '') + '</p>'; })()}
       <label>Who is a bookable practitioner in Trybe<select data-set="trybeRoles"><option value="therapy,studio"${s.trybeRoles === 'therapy,studio' ? ' selected' : ''}>Therapists and studio</option><option value="therapy"${s.trybeRoles === 'therapy' ? ' selected' : ''}>Therapists only</option><option value="foh,cafe,therapy,studio"${s.trybeRoles === 'foh,cafe,therapy,studio' ? ' selected' : ''}>Everyone</option></select></label>
       <div class="btns"><button data-act="buildfour">Build the rota for all four weeks</button><button class="primary" data-act="trybejson">Download Trybe rota file (JSON)</button><button data-act="trybecsv">Download as a list (CSV)</button></div>
-      <p class="hint">Only shifts in the chosen areas are exported, so time a multi-skilled person spends on front of house or in the café is not offered for bookings. The JSON file needs each person's Trybe practitioner ID filled in before it is loaded; the list is for entering rotas by hand. Treatments are listed for reference, because linking them needs Trybe's own offering IDs.</p></section>
+      <p class="hint">Only shifts in the chosen areas are exported, so time a multi-skilled person spends on front of house or in the café is not offered for bookings. The JSON file needs each person's Trybe practitioner ID filled in before it is loaded; the list is for entering rotas by hand. Treatments are listed for reference, because linking them needs Trybe's own offering IDs.</p>
+      ${trybePanel()}</section>
       <section class="card"><h3>Backup</h3><p>Everything is stored in this browser on this computer. Download a backup to move it to another computer or keep a copy.</p>
       <div class="btns"><button data-act="backup">Download backup</button><button data-act="restore">Restore from backup</button><button data-act="sample">Load the sample team</button><button class="danger" data-act="wipe">Clear everything</button></div></section></div>`;
+  }
+
+  // ---------- Trybe connection ----------
+  let trybePlan = null, trybeMsg = '', trybeResults = null;
+  function trybePanel() {
+    let html = '<h4>Send straight to Trybe</h4>';
+    html += Trybe.connected
+      ? `<p><span class="pill ok">Connected</span> ${Trybe.ENV_NAMES[Trybe.env]}${Trybe.kept ? ' · token remembered on this computer' : ' · token forgotten when this tab closes'} <button class="quiet" data-act="trybeforget">Disconnect and forget the token</button></p>`
+      : '<p class="muted">Not connected. You will be asked for your Trybe API token the first time.</p>';
+    html += `<div class="btns"><button class="primary" data-act="trybecheck">${trybePlan && trybePlan.wk === wk ? 'Check again' : 'Check against Trybe'}</button></div>`;
+    if (trybeMsg) html += `<p class="${/^(Checking|Sending)/.test(trybeMsg) ? 'muted' : 'warn'}">${esc(trybeMsg)}</p>`;
+    const p = trybePlan && trybePlan.wk === wk && trybePlan.env === Trybe.env ? trybePlan : null;
+    if (p) {
+      const ready = p.rows.filter(r => r.id && r.action !== 'skip').length;
+      html += '<div class="grid-wrap"><table class="plain trybe"><thead><tr><th>Team member</th><th>In Trybe</th><th>Current rota in Trybe</th><th>New rota</th><th>What to do</th></tr></thead><tbody>'
+        + p.rows.map((r, i) => `<tr><th>${esc(r.person.name)}</th>
+          <td><select data-tp="${i}|id"><option value="">Not in Trybe (skip)</option>${p.practitioners.map(x => `<option value="${esc(x.id)}"${x.id === r.id ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>${r.guessed ? '<small class="warn">matched on first name; check</small>' : ''}</td>
+          <td>${r.error ? `<span class="warn">${esc(r.error)}</span>` : !r.id ? '–' : !r.existing.length ? 'None' : r.existing.map(x => `from ${x.start || '?'}${x.end ? ' to ' + x.end : ''}, ${x.scheduling_week_interval}-week cycle`).join('<br>')}</td>
+          <td>${r.person.rota.scheduling_week_interval}-week cycle, ${r.person.rota.availability_rules.length} shifts${r.person.custom_availability.length ? `, ${r.person.custom_availability.length} time off` : ''}</td>
+          <td><select data-tp="${i}|action"${r.id ? '' : ' disabled'}><option value="skip"${r.action === 'skip' ? ' selected' : ''}>Skip</option>
+            ${r.id && !r.existing.length ? `<option value="create"${r.action === 'create' ? ' selected' : ''}>Create the rota</option>` : ''}
+            ${r.id && r.existing.length && !r.blocked ? `<option value="replace"${r.action === 'replace' ? ' selected' : ''}>End the current rota on ${D.nice(D.addDays(wk, -1))} and start this one</option>` : ''}
+            ${r.id && r.existing.length ? `<option value="create"${r.action === 'create' ? ' selected' : ''}>Add alongside the current rota</option>` : ''}</select>
+            ${r.blocked ? '<small class="warn">Trybe already has a rota starting on or after this date. End or remove it in Trybe first.</small>' : ''}</td></tr>`).join('')
+        + `</tbody></table></div>`
+        + (p.weeksMissing.length ? `<p class="warn">${p.weeksMissing.length} of the four weeks ${p.weeksMissing.length === 1 ? 'has' : 'have'} no rota yet, so the cycle sent would be incomplete.</p>` : '')
+        + `<div class="btns"><button class="primary" data-act="trybesend"${ready ? '' : ' disabled'}>Send ${ready} rota${ready === 1 ? '' : 's'} to Trybe (${Trybe.ENV_NAMES[p.env]})</button></div>`;
+    }
+    if (trybeResults) html += '<ul class="log">' + trybeResults.map(r => `<li class="${r.ok ? 'ok' : 'warn'}"><b>${esc(r.name)}</b>: ${r.ok ? 'rota created' : 'not sent. ' + esc(r.error || '')}${r.notes.length ? '; ' + r.notes.map(esc).join('; ') : ''}</li>`).join('') + '</ul>';
+    return html + '<p class="hint">Start with the Playground: it is Trybe\'s test environment and changes there do not affect real bookings. The token is kept in this browser only, apart from the rota data, and is never included in backups or exports. Nothing is sent until you press Send, and existing rotas are ended rather than deleted.</p>';
+  }
+
+  function tokenDialog(next) {
+    const dlg = $('dialog');
+    dlg.onchange = null;
+    dlg.innerHTML = `<form method="dialog"><h3>Connect to Trybe</h3>
+      <p>Paste an API token from your Trybe account. If you do not have one, ask Trybe support for an API token that can manage practitioner schedules.</p>
+      <label>API token<input type="password" name="token" autocomplete="off" spellcheck="false"></label>
+      <label>Environment<select name="env"><option value="playground">Playground (test) — safe to try</option><option value="live">Live — real rotas and bookings</option></select></label>
+      <label class="chk"><input type="checkbox" name="keep"> Remember the token on this computer</label>
+      <p class="hint">Leave this unticked on a shared computer: the token is then forgotten when the tab is closed.</p>
+      <ul class="issues" hidden></ul>
+      <div class="actions"><span></span><button type="button" data-do="cancel">Cancel</button><button type="button" class="primary" data-do="connect">Connect</button></div></form>`;
+    dlg.onclick = async e => {
+      const act = e.target.dataset.do, f = dlg.querySelector('form'), err = dlg.querySelector('.issues');
+      if (act === 'cancel') return dlg.close();
+      if (act !== 'connect') return;
+      if (!f.token.value.trim()) { err.hidden = false; err.innerHTML = '<li>Paste the token first.</li>'; return; }
+      e.target.disabled = true; e.target.textContent = 'Checking…';
+      try {
+        const n = await Trybe.connect(f.token.value, f.env.value, f.keep.checked);
+        dlg.close(); toast(`Connected to Trybe: ${n} practitioner${n === 1 ? '' : 's'} found.`);
+        trybePlan = null; trybeResults = null; render();
+        if (next) next();
+      } catch (ex) { err.hidden = false; err.innerHTML = `<li>${esc(ex.message)}</li>`; e.target.disabled = false; e.target.textContent = 'Connect'; }
+    };
+    dlg.showModal();
+  }
+  async function trybeCheck() {
+    trybeMsg = 'Checking practitioners and their current rotas in Trybe…'; trybeResults = null; render();
+    try { trybePlan = await Trybe.plan(wk, trybeRoles()); trybeMsg = trybePlan.rows.length ? '' : 'There is nothing to send: no one in the chosen areas is on the rota in these four weeks.'; }
+    catch (e) { trybeMsg = e.message; }
+    render();
   }
 
   // ---------- render ----------
@@ -321,6 +385,15 @@
     },
     trybejson() { download(`daha-trybe-rotas-${wk}.json`, JSON.stringify(Sheets.trybe(wk, trybeRoles()), null, 2), 'application/json'); return false; },
     trybecsv() { download(`daha-trybe-rotas-${wk}.csv`, '\ufeff' + Sheets.toCsv(Sheets.trybeRows(Sheets.trybe(wk, trybeRoles()))), 'text/csv'); return false; },
+    trybecheck() { if (Trybe.connected) trybeCheck(); else tokenDialog(trybeCheck); return false; },
+    trybeforget() { Trybe.forget(); trybePlan = null; trybeResults = null; trybeMsg = ''; toast('Disconnected. The token has been removed from this browser.'); },
+    async trybesend() {
+      const n = trybePlan.rows.filter(r => r.id && r.action !== 'skip').length;
+      if (!confirm(`Send ${n} rota${n === 1 ? '' : 's'} to Trybe ${Trybe.ENV_NAMES[trybePlan.env]}, starting ${D.nice(wk)}?` + (trybePlan.env === 'live' ? '\n\nThis changes real availability for bookings.' : ''))) return false;
+      trybeMsg = 'Sending…'; render();
+      try { trybeResults = await Trybe.send(trybePlan); trybeMsg = ''; trybePlan = null; toast(`${trybeResults.filter(r => r.ok).length} of ${trybeResults.length} rotas sent to Trybe.`, trybeResults.some(r => !r.ok)); }
+      catch (e) { trybeMsg = e.message; }
+    },
     backup() { download(`daha-rota-backup-${D.today()}.json`, JSON.stringify(D.state), 'application/json'); return false; },
     restore() { $('file-backup').click(); return false; },
     sample() { if (confirm('Replace everything with the sample team?')) { D.loadSample(); selected = null; } },
@@ -351,7 +424,13 @@
     $('view').addEventListener('change', e => {
       const el = e.target, p = D.person(selected);
       let redraw = true;
-      if (el.dataset.set) { D.state.settings[el.dataset.set] = el.type === 'number' ? +el.value || 10 : el.type === 'date' ? D.mondayOf(el.value || D.today()) : el.value.trim(); redraw = el.type === 'date' || el.tagName === 'SELECT'; }
+      if (el.dataset.tp && trybePlan) {
+        const [i, field] = el.dataset.tp.split('|'), row = trybePlan.rows[+i];
+        if (field === 'action') { row.action = el.value; return render(); }
+        row.id = el.value; row.guessed = false;
+        return void Trybe.inspect(row, wk).then(render);
+      }
+      if (el.dataset.set) { D.state.settings[el.dataset.set] = el.type === 'number' ? +el.value || 10 : el.type === 'date' ? D.mondayOf(el.value || D.today()) : el.value.trim(); redraw = el.type === 'date' || el.tagName === 'SELECT'; if (el.dataset.set === 'trybeRoles') { trybePlan = null; trybeResults = null; } }
       else if (el.dataset.treatlist != null) {
         const list = [...new Set(el.value.split(',').map(x => x.trim()).filter(Boolean))];
         D.state.treatments = list;
