@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dāha Wellness · Rota and capacity</title>
+  <link rel="icon" href="assets/logo.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="top">
+    <img src="assets/logo.png" alt="Dāha Wellness">
+    <div class="brand">Rota &amp; capacity</div>
+    <nav id="tabs">
+      <button data-tab="rota">Rota</button>
+      <button data-tab="team">Team</button>
+      <button data-tab="needs">Coverage needs</button>
+      <button data-tab="capacity">Capacity</button>
+      <button data-tab="sheets">Google Sheets</button>
+    </nav>
+    <div id="weeknav">
+      <button data-week="-1" title="Previous week">‹</button>
+      <span id="weeklabel"></span>
+      <button data-week="1" title="Next week">›</button>
+      <button data-week="0" class="quiet">This week</button>
+    </div>
+  </header>
+
+  <main id="view"></main>
+
+  <dialog id="dialog"></dialog>
+  <div id="toast" hidden></div>
+  <input type="file" id="file-csv" accept=".csv,text/csv" hidden>
+  <input type="file" id="file-backup" accept=".json,application/json" hidden>
+
+  <script src="js/data.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/sheets.js"></script>
+  <script src="js/ui.js"></script>
+</body>
+</html>
