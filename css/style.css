@@ -205,3 +205,19 @@ dialog::backdrop { background: rgba(0, 55, 49, .35); }
   .rota td.cell { height: auto; }
   .avail { display: none; }
 }
+
+/* ---------- rotation, treatments, notes ---------- */
+#weeklabel small { font-weight: 400; }
+.seg { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.seg > button:not(.quiet), .seg .weeks button { padding: 5px 12px; border: 1px solid var(--line); background: var(--white); border-radius: 5px; }
+.seg button.on { border-color: var(--deep); background: var(--deep); color: #fff; }
+.seg .weeks { display: inline-flex; gap: 4px; margin-left: 12px; }
+textarea { display: block; width: 100%; margin-top: 3px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; font: inherit; font-weight: 400; resize: vertical; }
+.treat { display: inline-block; padding: 1px 7px; border: 1px solid var(--c); border-radius: 10px; color: var(--c); font-size: 11px; font-weight: 600; }
+select option.no { color: #b9c4c2; }
+.block select { padding: 3px 4px; max-width: 130px; }
+.card.inline { flex-wrap: wrap; }
+.card.inline input[type=date] { width: auto; }
+.needs { margin-top: 14px; }
+.log ul { margin: 6px 0; padding-left: 20px; }
+.log li { margin-bottom: 2px; }

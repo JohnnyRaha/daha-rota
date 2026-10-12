@@ -6,7 +6,8 @@
   const h = m => { const v = D.hrs(m); return (Number.isInteger(v) ? v : v.toFixed(1)) + ' h'; };
   const span = (a, b) => `${D.hhmm(a)}–${D.hhmm(b)}`;
   const first = p => p.name.split(' ')[0];
-  let wk, tab = 'rota', selected = null, sheetLog = '';
+  let wk, tab = 'rota', selected = null, sheetLog = '', rot = 0;
+  const days = p => D.daysOf(p, wk);
 
   function toast(msg, bad) {
     const t = $('toast');
@@ -44,12 +45,12 @@
       html += `<tr class="group"><td colspan="9">${esc(r.name)}</td></tr>`;
       people.forEach(p => {
         const mins = E.minutes(shifts, p.id), over = mins > p.hours * 60;
-        html += `<tr><th class="who"><button class="link" data-act="person" data-id="${p.id}">${esc(p.name)}</button><small>${p.skills.map(s => D.role(s).short).join(' · ')}</small></th>`;
+        html += `<tr><th class="who"><button class="link" data-act="person" data-id="${p.id}">${esc(p.name)}</button><small>${p.skills.map(s => D.role(s).short).join(' · ')}${p.treatments.length ? ' · ' + p.treatments.length + ' treatment' + (p.treatments.length > 1 ? 's' : '') : ''}</small></th>`;
         dates.forEach((date, day) => {
-          const mine = shifts.filter(s => s.staffId === p.id && s.day === day).sort((a, b) => a.start - b.start), hol = E.onHoliday(p, date), d = p.days[day];
+          const mine = shifts.filter(s => s.staffId === p.id && s.day === day).sort((a, b) => a.start - b.start), hol = E.onHoliday(p, date), d = days(p)[day];
           html += `<td class="cell${hol ? ' hol' : !d.on ? ' off' : ''}" data-act="add" data-id="${p.id}" data-day="${day}">`
             + (hol ? '<span class="state">Holiday</span>' : !d.on && !mine.length ? '<span class="state">Off</span>' : !mine.length ? `<span class="avail">${span(d.start, d.end)}</span>` : '')
-            + mine.map(s => { const issues = E.check(wk, s); return `<button class="shift${issues.length ? ' flag' : ''}" style="--c:${D.role(s.role).color}" data-act="edit" data-shift="${s.id}" title="${esc(issues.join('\n') || 'Click to edit')}">${span(s.start, s.end)}<small>${esc(D.role(s.role).short)}${issues.length ? ' ⚠' : ''}</small></button>`; }).join('')
+            + mine.map(s => { const issues = E.check(wk, s); return `<button class="shift${issues.length ? ' flag' : ''}" style="--c:${D.role(s.role).color}" data-act="edit" data-shift="${s.id}" title="${esc(issues.join('\n') || 'Click to edit')}">${span(s.start, s.end)}<small>${esc(s.treatment || D.role(s.role).short)}${issues.length ? ' ⚠' : ''}</small></button>`; }).join('')
             + '</td>';
         });
         html += `<td class="hrs${over ? ' warn' : ''}">${h(mins)}<small>of ${p.hours} h</small></td></tr>`;
@@ -61,12 +62,12 @@
     if (!gaps.length) html += '<p class="empty ok">Every area is covered for the whole week.</p>';
     gaps.forEach((g, i) => {
       const o = E.options(wk, g);
-      html += `<div class="gap" id="gap-${g.role}-${g.day}" style="--c:${D.role(g.role).color}"><div class="gap-head">${roleTag(g.role)} <b>${D.DAY_NAMES[g.day]} ${D.nice(dates[g.day])}</b> · ${span(g.start, g.end)} · <span class="warn">${g.short} ${g.short === 1 ? 'person' : 'people'} short</span></div>`;
+      html += `<div class="gap" id="gap-${g.role}-${g.day}" style="--c:${D.role(g.role).color}"><div class="gap-head">${roleTag(g.role)} ${g.treatment ? `<span class="treat">${esc(g.treatment)}</span> ` : ''}<b>${D.DAY_NAMES[g.day]} ${D.nice(dates[g.day])}</b> · ${span(g.start, g.end)} · <span class="warn">${g.short} ${g.short === 1 ? 'person' : 'people'} short</span></div>`;
       if (o.regular.length) html += '<div class="opts"><span class="lbl">Available</span>' + o.regular.slice(0, 6).map((c, k) =>
         `<button data-act="assign" data-gap="${i}" data-kind="regular" data-opt="${k}"><b>${esc(first(c.staff))}</b> ${span(c.start, c.end)}<small>${c.full ? 'covers it all' : 'covers part'} · ${c.primary ? 'main area' : 'cross-trained'} · ${h(c.left)} left</small></button>`).join('') + '</div>';
       if (o.exceptions.length) html += '<div class="opts exc"><span class="lbl">By exception</span>' + o.exceptions.slice(0, 4).map((c, k) =>
         `<button data-act="assign" data-gap="${i}" data-kind="exceptions" data-opt="${k}"><b>${esc(first(c.staff))}</b> ${span(c.start, c.end)}<small>${esc(c.why)}</small></button>`).join('') + '</div>';
-      if (!o.regular.length && !o.exceptions.length) html += `<p class="none-free">No one trained for ${esc(D.role(g.role).name)} is free then. Options: cross-train someone, change working hours on the Team tab, or reduce the cover needed.</p>`;
+      if (!o.regular.length && !o.exceptions.length) html += `<p class="none-free">No one ${g.treatment ? 'who does ' + esc(g.treatment) : 'trained for ' + esc(D.role(g.role).name)} is free then. Options: train someone else, change working hours on the Team tab, or reduce the cover needed.</p>`;
       html += '</div>';
     });
     return html;
@@ -78,6 +79,7 @@
       dlg.innerHTML = `<form method="dialog"><h3>${isNew ? 'Add a shift' : 'Change shift'}</h3>
         <label>Team member<select name="staffId">${D.state.staff.map(s => `<option value="${s.id}"${s.id === shift.staffId ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
         <label>Area<select name="role">${roleOptions(shift.role, p)}</select></label>
+        ${shift.role === 'therapy' ? `<label>Treatment<select name="treatment"><option value="">Any treatment (general cover)</option>${D.state.treatments.map(x => `<option${x === shift.treatment ? ' selected' : ''}${p && !p.treatments.includes(x) ? ' class="no"' : ''}>${esc(x)}</option>`).join('')}</select></label>` : ''}
         <label>Day<select name="day">${D.DAY_NAMES.map((n, i) => `<option value="${i}"${i === shift.day ? ' selected' : ''}>${n} ${D.nice(D.addDays(wk, i))}</option>`).join('')}</select></label>
         <div class="two"><label>Start<input type="time" name="start" step="900" value="${D.hhmm(shift.start)}"></label><label>End<input type="time" name="end" step="900" value="${D.hhmm(shift.end)}"></label></div>
         ${issues.length ? `<ul class="issues">${issues.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="fine">No conflicts.</p>'}
@@ -85,7 +87,9 @@
     };
     dlg.onchange = e => {
       const n = e.target.name;
-      if (n === 'start' || n === 'end') shift[n] = D.t(e.target.value || '00:00'); else if (n === 'role') shift.role = e.target.value; else if (n) shift[n] = +e.target.value;
+      if (n === 'start' || n === 'end') shift[n] = D.t(e.target.value || '00:00'); else if (n === 'role') shift.role = e.target.value;
+      else if (n === 'treatment') { if (e.target.value) shift.treatment = e.target.value; else delete shift.treatment; } else if (n) shift[n] = +e.target.value;
+      if (shift.role !== 'therapy') delete shift.treatment;
       draw();
     };
     dlg.onclick = e => {
@@ -93,7 +97,7 @@
       if (!act) return;
       if (act === 'save') { if (shift.end <= shift.start) return; delete shift.auto; if (isNew) list.push(shift); }
       if (act === 'delete') list.splice(list.indexOf(shift), 1);
-      if (act === 'cancel' && !isNew) Object.assign(shift, backup);
+      if (act === 'cancel' && !isNew) { Object.keys(shift).forEach(k => delete shift[k]); Object.assign(shift, backup); }
       dlg.close(); D.save(); render();
     };
     const backup = Object.assign({}, shift);
@@ -112,14 +116,20 @@
     });
     html += '</aside><section class="card editor">';
     if (!p) return html + '<p class="empty">Add your first team member to get started.</p></section></div>';
+    const rotating = p.patterns.length > 1, pat = p.patterns[rotating ? rot : 0];
     html += `<div class="two"><label>Name<input data-f="name" value="${esc(p.name)}"></label><label>Contracted hours per week<input type="number" min="0" max="60" step="0.5" data-f="hours" value="${p.hours}"></label></div>
       <div class="two"><label>Main area<select data-f="primary">${roleOptions(p.primary)}</select></label>
       <div class="field"><span>Trained to work in</span><div class="checks">${D.ROLES.map(r => `<label><input type="checkbox" data-skill="${r.id}"${p.skills.includes(r.id) ? ' checked' : ''}${r.id === p.primary ? ' disabled' : ''}> ${esc(r.name)}</label>`).join('')}</div></div></div>
-      <h3>Working days and hours</h3><table class="days"><tbody>`
-      + p.days.map((d, i) => `<tr class="${d.on ? '' : 'offrow'}"><td><label class="chk"><input type="checkbox" data-day="${i}" data-k="on"${d.on ? ' checked' : ''}> ${D.DAY_NAMES[i]}</label></td>
+      ${p.skills.includes('therapy') ? `<div class="field"><span>Treatments ${esc(first(p))} can do</span><div class="checks">${D.state.treatments.map(x => `<label><input type="checkbox" data-treat="${esc(x)}"${p.treatments.includes(x) ? ' checked' : ''}> ${esc(x)}</label>`).join('')}</div></div>` : ''}
+      <h3>Working days and hours</h3>
+      <div class="seg"><button class="${rotating ? '' : 'on'}" data-act="pattern" data-n="1">Same every week</button><button class="${rotating ? 'on' : ''}" data-act="pattern" data-n="4">4-week rotation</button>
+        ${rotating ? '<span class="weeks">' + [0, 1, 2, 3].map(i => `<button class="${i === rot ? 'on' : ''}" data-act="rot" data-n="${i}">Week ${i + 1}${i === D.rotationWeek(wk) ? ' •' : ''}</button>`).join('') + '</span><button class="quiet" data-act="copyrot">Copy this week to the other three</button>' : ''}</div>
+      <table class="days"><tbody>`
+      + pat.map((d, i) => `<tr class="${d.on ? '' : 'offrow'}"><td><label class="chk"><input type="checkbox" data-day="${i}" data-k="on"${d.on ? ' checked' : ''}> ${D.DAY_NAMES[i]}</label></td>
         <td><input type="time" step="900" data-day="${i}" data-k="start" value="${D.hhmm(d.start)}"${d.on ? '' : ' disabled'}></td><td>to</td>
         <td><input type="time" step="900" data-day="${i}" data-k="end" value="${D.hhmm(d.end)}"${d.on ? '' : ' disabled'}></td><td class="muted">${d.on ? h(d.end - d.start) : 'not working'}</td></tr>`).join('')
-      + `</tbody></table><p class="hint">Available ${h(p.days.reduce((s, d) => s + (d.on ? d.end - d.start : 0), 0))} a week across ${p.days.filter(d => d.on).length} days; the rota never gives more than the ${p.hours} contracted hours unless you override it.</p>
+      + `</tbody></table><p class="hint">${rotating ? `Rotation week ${rot + 1}: available` : 'Available'} ${h(pat.reduce((s, d) => s + (d.on ? d.end - d.start : 0), 0))} across ${pat.filter(d => d.on).length} days. ${rotating ? `The week shown on the rota is rotation week ${D.rotationWeek(wk) + 1} (•). ` : ''}The rota never gives more than the ${p.hours} contracted hours unless you override it.</p>
+      <label>Notes<textarea data-f="note" rows="2" placeholder="Anything to remember when scheduling">${esc(p.note)}</textarea></label>
       <h3>Holidays and time off</h3>`
       + (p.holidays.length ? '<table class="hols"><tbody>' + p.holidays.map((x, i) => `<tr><td><input type="date" data-hol="${i}" data-k="from" value="${x.from}"></td><td>to</td><td><input type="date" data-hol="${i}" data-k="to" value="${x.to}"></td>
         <td><input placeholder="Note" data-hol="${i}" data-k="note" value="${esc(x.note || '')}"></td><td><button class="x" data-act="delhol" data-i="${i}" title="Remove">×</button></td></tr>`).join('') + '</tbody></table>' : '<p class="muted">None booked.</p>')
@@ -130,14 +140,18 @@
   // ---------- coverage needs ----------
   function needsView() {
     let html = `<p class="lead">How many people each area needs, and when. The rota is checked against this, so it drives every gap and suggestion. Defaults follow the published opening hours (Mon–Fri 8:00–20:00, Sat 8:00–18:00, Sun 9:00–16:00).</p>
-      <div class="card inline"><label>Longest day anyone should work<input type="number" min="4" max="14" step="0.5" data-set="maxDay" value="${D.state.settings.maxDay}"> hours</label><button data-act="resetneeds">Reset to defaults</button></div><div class="needs">`;
+      <div class="card inline"><label>Longest day anyone should work<input type="number" min="4" max="14" step="0.5" data-set="maxDay" value="${D.state.settings.maxDay}"> hours</label>
+        <label>Rotation week 1 starts on the week of<input type="date" data-set="rotationStart" value="${D.state.settings.rotationStart}"></label><span class="muted">This week is rotation week ${D.rotationWeek(wk) + 1}</span><button data-act="resetneeds">Reset to defaults</button></div>
+      <div class="card"><label>Treatment types (separate with commas)<input data-treatlist value="${esc(D.state.treatments.join(', '))}"></label>
+        <p class="hint">Tick the treatments each therapist can do on the Team tab. On a Therapists shift below, leave the treatment as “Any” for general cover, or pick one when you need someone who can do that treatment at that time. Treatment-specific cover is counted separately from general cover.</p></div><div class="needs">`;
     D.ROLES.forEach(r => {
       html += `<section class="card" style="--c:${r.color}"><h3>${roleTag(r.id)} ${esc(r.name)} <button class="quiet" data-act="copymon" data-role="${r.id}">Copy Monday to Tue–Fri</button></h3><table class="blocks"><tbody>`;
       D.DAYS.forEach((_, day) => {
         const blocks = D.state.needs[r.id][day];
         html += `<tr><th>${D.DAY_NAMES[day]}</th><td>` + (blocks.length ? '' : '<span class="muted">No cover needed</span>') + blocks.map((b, i) =>
           `<span class="block"><input type="time" step="900" data-need="${r.id}|${day}|${i}|start" value="${D.hhmm(b.start)}">–<input type="time" step="900" data-need="${r.id}|${day}|${i}|end" value="${D.hhmm(b.end)}">
-           <input type="number" min="1" max="20" data-need="${r.id}|${day}|${i}|count" value="${b.count}" title="People needed"> <small>${b.count === 1 ? 'person' : 'people'}</small><button class="x" data-act="delblock" data-role="${r.id}" data-day="${day}" data-i="${i}" title="Remove">×</button></span>`).join('')
+           <input type="number" min="1" max="20" data-need="${r.id}|${day}|${i}|count" value="${b.count}" title="People needed"> <small>${b.count === 1 ? 'person' : 'people'}</small>
+           ${r.id === 'therapy' ? `<select data-need="${r.id}|${day}|${i}|treatment" title="Treatment needed"><option value="">Any</option>${D.state.treatments.map(x => `<option${x === b.treatment ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}<button class="x" data-act="delblock" data-role="${r.id}" data-day="${day}" data-i="${i}" title="Remove">×</button></span>`).join('')
           + `<button class="quiet" data-act="addblock" data-role="${r.id}" data-day="${day}">+ shift</button></td></tr>`;
       });
       html += '</tbody></table></section>';
@@ -158,6 +172,11 @@
       if (r.unfilled && r.required <= r.primary + r.cross) insights.push(['warn', `${r.role.name} still has ${h(r.unfilled)} uncovered on the rota, mostly on ${D.DAY_NAMES[worst[1]]}. The hours exist in the team but not at the right times; look at working days and hours.`]);
       if (r.dedicated === 1) insights.push(['warn', `${r.role.name} has only one dedicated person, so a single absence removes most of its cover.`]);
     });
+    c.treatments.forEach(x => {
+      if (!x.who.length && x.required) insights.push(['bad', `${x.name} cover is needed for ${h(x.required)} but no one on the team is marked as doing it.`]);
+      else if (x.who.length === 1) insights.push(['warn', `Only ${first(x.who[0])} does ${x.name}, so it cannot be offered when they are off.`]);
+      if (x.required > x.available && x.who.length) insights.push(['bad', `${x.name} cover is needed for ${h(x.required)} but the people who do it have only ${h(x.available)} available this week.`]);
+    });
     const away = c.people.filter(p => p.holidayDays);
     if (away.length) insights.push(['info', `On holiday this week: ${away.map(p => `${first(p.staff)} (${p.holidayDays} working day${p.holidayDays > 1 ? 's' : ''})`).join(', ')}.`]);
     const spare = c.people.filter(p => p.available - p.scheduled >= 240).sort((a, b) => (b.available - b.scheduled) - (a.available - a.scheduled));
@@ -171,6 +190,8 @@
       + `</tbody></table></div><p class="hint">“Own team can give” is the available hours of people whose main area this is; “cross-trained cover” is the hours of people from other areas who are also trained here. Cross-trained hours can only be used once, so they are not added up across areas.</p>
       <h2>Cover by day</h2><div class="grid-wrap"><table class="plain heat"><thead><tr><th>Area</th>${D.DAYS.map(d => `<th>${d}</th>`).join('')}</tr></thead><tbody>`
       + c.roles.map(r => `<tr><th>${esc(r.role.name)}</th>` + r.byDay.map(d => !d.need ? '<td class="none">–</td>' : `<td class="${d.miss ? (d.miss >= d.need / 2 ? 'h2' : 'h1') : 'h0'}">${d.miss ? '−' + h(d.miss) : '✓'}</td>`).join('') + '</tr>').join('')
+      + `</tbody></table></div><h2>By treatment</h2><div class="grid-wrap"><table class="plain"><thead><tr><th>Treatment</th><th>Who can do it</th><th>Their available hours</th><th>Specific cover needed</th><th>Uncovered</th></tr></thead><tbody>`
+      + c.treatments.map(x => `<tr><th>${esc(x.name)}</th><td class="${x.who.length < 2 ? 'warn' : ''}" style="white-space:normal;text-align:left">${x.who.length ? x.who.map(first).map(esc).join(', ') : 'No one'}</td><td>${h(x.available)}</td><td>${x.required ? h(x.required) : '–'}</td><td class="${x.unfilled ? 'warn' : ''}">${x.required ? h(x.unfilled) : '–'}</td></tr>`).join('')
       + `</tbody></table></div><h2>By person</h2><div class="grid-wrap"><table class="plain"><thead><tr><th>Team member</th><th>Trained for</th><th>Contracted</th><th>Available this week</th><th>Scheduled</th><th>Use of available hours</th></tr></thead><tbody>`
       + c.people.map(p => `<tr><th>${esc(p.staff.name)}</th><td>${p.staff.skills.map(roleTag).join(' ')}</td><td>${h(p.contract)}</td><td>${h(p.available)}${p.holidayDays ? ' <small>holiday</small>' : ''}</td><td class="${p.scheduled > p.contract ? 'warn' : ''}">${h(p.scheduled)}</td>
         <td>${bar(p.scheduled, p.available, p.scheduled > p.contract ? '#b5523b' : D.role(p.staff.primary).color)} ${pctOf(p.scheduled, p.available)}%</td></tr>`).join('') + '</tbody></table></div>';
@@ -180,11 +201,13 @@
   // ---------- Google Sheets ----------
   function sheetsView() {
     const s = D.state.settings;
-    return `<div class="cols"><section class="card"><h3>1 · Read the team and skills from a Google Sheet</h3>
-      <p>The sheet needs a <b>Name</b> column and either a <b>Skills</b> column (for example “Café, Front of House”) or one column per area marked Y. Optional columns: Primary role, Hours, Mon to Sun (for example 09:00-17:00) and Holidays (2026-12-24 to 2026-12-31). People are matched by name; anything not in the sheet is left as it is.</p>
+    return `<div class="cols"><section class="card"><h3>1 · Read the team, skills and hours from a Google Sheet</h3>
+      <p>Two layouts are understood:</p>
+      <ul><li><b>A tab per team</b> (Therapists, FOH, BaristasAttendants, Instructors, Acupuncturists), with a block for each person: their name, the days across the top, then a row for each rotation week (“WEEK 1”, “WEEK 2 &amp; 4”, “Weekly”) with times such as “7:30AM - 3:30PM”. A person on two tabs is treated as trained in both areas. A “Weekly Shifts” tab sets the cover needed.</li>
+      <li><b>One row per person</b>, with a Name column and a Skills column; optional Primary role, Treatments, Hours, Mon to Sun and Holidays columns. Download the template for an example.</li></ul>
       <label>Google Sheet link<input data-set="sheetUrl" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(s.sheetUrl)}"></label>
-      <div class="btns"><button class="primary" data-act="import">Read from Google Sheet</button><button data-act="importcsv">Import a CSV file instead</button><button data-act="template">Download a template</button></div>
-      <p class="hint">The sheet must be shared as “Anyone with the link can view” for the tool to read it. Anyone who has that link can then see the sheet, so keep it to names, skills and hours.</p>
+      <div class="btns"><button class="primary" data-act="import">Read from Google Sheet</button><button data-act="importcsv">Import a file (.xlsx or .csv)</button><button data-act="template">Download a template</button></div>
+      <p class="hint">Reading from a link only works if the sheet is shared as “Anyone with the link can view”, and anyone with the link can then read everything in it, including notes about leave. To keep the sheet private, use File → Download → Microsoft Excel in Google Sheets and import that file instead: it is read in this browser and not uploaded anywhere.</p>
       ${sheetLog ? `<div class="log">${sheetLog}</div>` : ''}</section>
       <section class="card"><h3>2 · Export this week's rota to a Google Sheet</h3>
       <p><b>Quickest:</b> copy the rota and paste it into any Google Sheet.</p>
@@ -205,7 +228,7 @@
   const VIEWS = { rota: rotaView, team: teamView, needs: needsView, capacity: capacityView, sheets: sheetsView };
   function render() {
     const dates = D.weekDates(wk), gaps = E.gaps(wk).length;
-    $('weeklabel').textContent = `${D.nice(dates[0])} – ${D.nice(dates[6])} ${dates[6].slice(0, 4)}`;
+    $('weeklabel').innerHTML = `${D.nice(dates[0])} – ${D.nice(dates[6])} ${dates[6].slice(0, 4)}<small>Rotation week ${D.rotationWeek(wk) + 1}</small>`;
     document.querySelectorAll('#tabs button').forEach(b => { b.classList.toggle('on', b.dataset.tab === tab); if (b.dataset.tab === 'rota') b.innerHTML = 'Rota' + (gaps ? ` <i>${gaps}</i>` : ''); });
     const y = $('view').scrollTop;
     $('view').innerHTML = VIEWS[tab]();
@@ -228,20 +251,27 @@
     },
     print() { window.print(); },
     jump(el) { const g = $(`gap-${el.dataset.role}-${el.dataset.day}`); if (g) { g.scrollIntoView({ behavior: 'smooth', block: 'center' }); g.classList.add('flash'); setTimeout(() => g.classList.remove('flash'), 1600); } return false; },
-    person(el) { selected = +el.dataset.id; go('team'); return false; },
+    person(el) { selected = +el.dataset.id; rot = D.rotationWeek(wk); go('team'); return false; },
     add(el) {
-      const p = D.person(+el.dataset.id), day = +el.dataset.day, d = p.days[day];
+      const p = D.person(+el.dataset.id), day = +el.dataset.day, d = days(p)[day];
       shiftDialog({ id: D.newId(), staffId: p.id, role: p.primary, day, start: d.on ? d.start : D.t('09:00'), end: d.on ? Math.min(d.end, d.start + 480) : D.t('17:00') }, true);
       return false;
     },
     edit(el) { shiftDialog(D.shifts(wk).find(s => s.id === +el.dataset.shift), false); return false; },
     assign(el) {
       const g = E.gaps(wk)[+el.dataset.gap], o = E.options(wk, g)[el.dataset.kind][+el.dataset.opt];
-      D.shifts(wk).push({ id: D.newId(), staffId: o.staff.id, role: g.role, day: g.day, start: o.start, end: o.end });
+      D.shifts(wk).push(Object.assign({ id: D.newId(), staffId: o.staff.id, role: g.role, day: g.day, start: o.start, end: o.end }, g.treatment ? { treatment: g.treatment } : {}));
       E.tidy(wk); D.save(); toast(`${first(o.staff)} added to ${D.role(g.role).name}, ${D.DAY_NAMES[g.day]} ${span(o.start, o.end)}.`);
     },
     newperson() { selected = D.addStaff({}).id; D.save(); },
-    select(el) { selected = +el.dataset.id; },
+    pattern(el) {
+      const p = D.person(selected), cur = p.patterns[p.patterns.length > 1 ? rot : 0];
+      p.patterns = +el.dataset.n === 1 ? [cur] : [0, 1, 2, 3].map(() => JSON.parse(JSON.stringify(cur)));
+      rot = D.rotationWeek(wk); D.save();
+    },
+    rot(el) { rot = +el.dataset.n; },
+    copyrot() { const p = D.person(selected); p.patterns = [0, 1, 2, 3].map(() => JSON.parse(JSON.stringify(p.patterns[rot]))); D.save(); toast('Copied to all four rotation weeks.'); },
+    select(el) { selected = +el.dataset.id; rot = D.rotationWeek(wk); },
     addhol() { D.person(selected).holidays.push({ from: wk, to: wk, note: '' }); D.save(); },
     delhol(el) { D.person(selected).holidays.splice(+el.dataset.i, 1); D.save(); },
     delperson() {
@@ -257,7 +287,7 @@
     resetneeds() { if (confirm('Reset the cover needed in every area to the defaults?')) { D.state.needs = D.defaultNeeds(); D.save(); } },
     async import() {
       sheetLog = 'Reading the sheet…'; render();
-      try { importRows(Sheets.parseCsv(await Sheets.fetchSheet(D.state.settings.sheetUrl))); } catch (e) { sheetLog = `<span class="warn">${esc(e.message)}</span>`; }
+      try { importResult(Sheets.readAny(await Sheets.fetchSheet(D.state.settings.sheetUrl))); } catch (e) { sheetLog = `<span class="warn">${esc(e.message)}</span>`; }
     },
     importcsv() { $('file-csv').click(); return false; },
     template() { download('daha-team-template.csv', Sheets.toCsv(Sheets.TEMPLATE), 'text/csv'); return false; },
@@ -280,10 +310,13 @@
     sample() { if (confirm('Replace everything with the sample team?')) { D.loadSample(); selected = null; } },
     wipe() { if (confirm('Delete the whole team, every rota and all settings from this browser?')) { D.clearAll(); selected = null; } }
   };
-  function importRows(rows) {
-    const { people, notes } = Sheets.readPeople(rows), r = Sheets.applyPeople(people);
-    sheetLog = `<b>${r.added} added, ${r.updated} updated.</b> ` + people.map(p => `${esc(p.name)}: ${(D.state.staff.find(s => s.name === p.name) || { skills: [] }).skills.map(s => D.role(s).short).join(', ')}`).join(' · ')
-      + (notes.length ? `<br><span class="warn">${notes.map(esc).join('<br>')}</span>` : '');
+  function importResult(result) {
+    const r = Sheets.apply(result);
+    selected = null; rot = D.rotationWeek(wk);
+    sheetLog = `<b>${r.added} added, ${r.updated} updated${r.replaced ? ' (the sample team was replaced)' : ''}.</b>`
+      + (r.areas.length ? ` Cover needed was set for ${r.areas.map(a => D.role(a).name).join(', ')} from the Weekly Shifts tab.` : '')
+      + '<ul>' + result.people.map(p => { const cur = D.state.staff.find(s => s.name === p.name) || p; return `<li><b>${esc(cur.name)}</b>: ${cur.skills.map(s => D.role(s).short).join(' + ')}${cur.treatments.length ? ' (' + cur.treatments.map(esc).join(', ') + ')' : ''}, ${cur.hours} h, ${cur.patterns.length > 1 ? '4-week rotation' : 'same every week'}</li>`; }).join('') + '</ul>'
+      + (result.notes.length ? `<p class="warn"><b>${result.notes.length} thing${result.notes.length > 1 ? 's' : ''} to check:</b></p><ul class="warn">${result.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '');
     render();
   }
 
@@ -302,18 +335,27 @@
     $('view').addEventListener('change', e => {
       const el = e.target, p = D.person(selected);
       let redraw = true;
-      if (el.dataset.set) { D.state.settings[el.dataset.set] = el.type === 'number' ? +el.value || 10 : el.value.trim(); redraw = false; }
+      if (el.dataset.set) { D.state.settings[el.dataset.set] = el.type === 'number' ? +el.value || 10 : el.type === 'date' ? D.mondayOf(el.value || D.today()) : el.value.trim(); redraw = el.type === 'date'; }
+      else if (el.dataset.treatlist != null) {
+        const list = [...new Set(el.value.split(',').map(x => x.trim()).filter(Boolean))];
+        D.state.treatments = list;
+        D.state.staff.forEach(s => { s.treatments = s.treatments.filter(x => list.includes(x)); });
+        D.ROLES.forEach(r => D.state.needs[r.id].forEach(day => day.forEach(b => { if (b.treatment && !list.includes(b.treatment)) delete b.treatment; })));
+      }
       else if (el.dataset.need) {
         const [r, day, i, k] = el.dataset.need.split('|'), b = D.state.needs[r][+day][+i];
-        b[k] = k === 'count' ? Math.max(1, Math.round(+el.value) || 1) : D.t(el.value || '00:00');
+        if (k === 'treatment') { if (el.value) b.treatment = el.value; else delete b.treatment; }
+        else b[k] = k === 'count' ? Math.max(1, Math.round(+el.value) || 1) : D.t(el.value || '00:00');
         if (b.end <= b.start) { b.end = Math.min(b.start + 60, 1440); toast('The end must be after the start; adjusted.', true); }
       } else if (tab === 'team' && p) {
         if (el.dataset.f === 'name') { p.name = el.value.trim() || 'Unnamed'; }
         else if (el.dataset.f === 'hours') { p.hours = Math.max(0, +el.value || 0); }
-        else if (el.dataset.f === 'primary') { p.primary = el.value; if (!p.skills.includes(p.primary)) p.skills.push(p.primary); }
-        else if (el.dataset.skill) { p.skills = D.ROLES.map(r => r.id).filter(id => id === p.primary || (id === el.dataset.skill ? el.checked : p.skills.includes(id))); }
+        else if (el.dataset.f === 'note') { p.note = el.value; redraw = false; }
+        else if (el.dataset.treat) { p.treatments = D.state.treatments.filter(x => x === el.dataset.treat ? el.checked : p.treatments.includes(x)); }
+        else if (el.dataset.f === 'primary') { p.primary = el.value; D.normalise(p); }
+        else if (el.dataset.skill) { p.skills = D.ROLES.map(r => r.id).filter(id => id === p.primary || (id === el.dataset.skill ? el.checked : p.skills.includes(id))); D.normalise(p); }
         else if (el.dataset.day != null) {
-          const d = p.days[+el.dataset.day], k = el.dataset.k;
+          const d = p.patterns[p.patterns.length > 1 ? rot : 0][+el.dataset.day], k = el.dataset.k;
           if (k === 'on') d.on = el.checked; else d[k] = D.t(el.value || '00:00');
           if (d.end <= d.start) { d.end = Math.min(d.start + 60, 1440); toast('The end must be after the start; adjusted.', true); }
         } else if (el.dataset.hol != null) {
@@ -328,7 +370,7 @@
     });
     $('file-csv').onchange = e => {
       const f = e.target.files[0];
-      if (f) f.text().then(text => { try { importRows(Sheets.parseCsv(text)); } catch (err) { sheetLog = `<span class="warn">${esc(err.message)}</span>`; render(); } });
+      if (f) Sheets.readFile(f).then(book => importResult(Sheets.readAny(book))).catch(err => { sheetLog = `<span class="warn">${esc(err.message)}</span>`; render(); });
       e.target.value = '';
     };
     $('file-backup').onchange = e => {

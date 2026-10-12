@@ -1,14 +1,16 @@
-// Google Sheets: read the team and their skills from a sheet, and export a week's rota to one.
+// Google Sheets: read the team from a sheet or workbook, and export a week's rota to one.
 const Sheets = (function () {
   'use strict';
   const D = Data;
-  const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const norm = s => String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const ALIASES = {
-    foh: ['foh', 'frontofhouse', 'frontdesk', 'reception', 'receptionist'], cafe: ['cafe', 'barista', 'coffee', 'kitchen'],
-    therapy: ['therapy', 'therapist', 'therapists', 'treatments', 'treatment', 'massage'], studio: ['studio', 'studiocoordinator', 'studiostaff', 'classes', 'instructor']
+    foh: ['foh', 'frontofhouse', 'frontdesk', 'reception', 'receptionist'], cafe: ['cafe', 'barista', 'baristas', 'baristasattendants', 'attendants', 'coffee', 'kitchen'],
+    therapy: ['therapy', 'therapist', 'therapists', 'treatments', 'treatment', 'massage', 'acupuncturists', 'acupuncturist'],
+    studio: ['studio', 'studiocoordinator', 'studiostaff', 'classes', 'instructor', 'instructors']
   };
   const roleOf = s => { const k = norm(s); return Object.keys(ALIASES).find(r => ALIASES[r].includes(k)) || null; };
-  const truthy = s => /^(y|yes|true|1|x|✓|✔)$/i.test(String(s || '').trim());
+  const truthy = s => /^(y|yes|true|1|x|✓|✔)$/i.test(String(s == null ? '' : s).trim());
+  const treatmentOf = s => D.state.treatments.find(t => norm(t) === norm(s)) || null;
 
   // ---------- CSV ----------
   function parseCsv(text) {
@@ -29,75 +31,242 @@ const Sheets = (function () {
   const toCsv = rows => rows.map(r => r.map(quote).join(',')).join('\r\n');
   const toTsv = rows => rows.map(r => r.map(quote).join('\t')).join('\n');
 
-  // ---------- import ----------
-  function sheetCsvUrls(url) {
-    const id = (String(url).match(/\/spreadsheets\/d\/([\w-]+)/) || [])[1];
-    if (!id) throw new Error('That does not look like a Google Sheets link. Copy the address from the browser while the sheet is open.');
-    const gid = (String(url).match(/[#?&]gid=(\d+)/) || [])[1] || '0';
-    return [`https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&gid=${gid}`, `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`];
-  }
-  async function fetchSheet(url) {
-    let lastError = 'no response';
-    for (const u of sheetCsvUrls(url)) {
-      try {
-        const res = await fetch(u, { redirect: 'follow' });
-        const text = await res.text();
-        if (res.ok && !/^\s*<(!doctype|html)/i.test(text)) return text;
-        lastError = 'the sheet is not shared';
-      } catch (e) { lastError = e.message; }
+  // ---------- Excel workbook (.xlsx) ----------
+  // An .xlsx file is a zip of XML files. The browser can unzip and parse it without any library.
+  async function readXlsx(buffer) {
+    const view = new DataView(buffer), bytes = new Uint8Array(buffer), files = {}, dec = new TextDecoder();
+    let eocd = buffer.byteLength - 22;
+    while (eocd >= 0 && view.getUint32(eocd, true) !== 0x06054b50) eocd--;
+    if (eocd < 0) throw new Error('That file is not an Excel workbook (.xlsx).');
+    let at = view.getUint32(eocd + 16, true);
+    for (let n = view.getUint16(eocd + 10, true); n > 0; n--) {
+      const method = view.getUint16(at + 10, true), size = view.getUint32(at + 20, true), nameLen = view.getUint16(at + 28, true);
+      const name = dec.decode(bytes.subarray(at + 46, at + 46 + nameLen)), local = view.getUint32(at + 42, true);
+      const start = local + 30 + view.getUint16(local + 26, true) + view.getUint16(local + 28, true);
+      files[name] = { method, data: bytes.subarray(start, start + size) };
+      at += 46 + nameLen + view.getUint16(at + 30, true) + view.getUint16(at + 32, true);
     }
-    throw new Error(`Could not read the sheet (${lastError}). In Google Sheets choose Share → General access → "Anyone with the link" (Viewer), then try again. Or download it as CSV and use "Import a CSV file".`);
+    const text = async name => {
+      const f = files[name];
+      if (!f) return '';
+      if (f.method === 0) return dec.decode(f.data);
+      return new Response(new Blob([f.data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
+    };
+    const xml = async name => new DOMParser().parseFromString(await text(name), 'application/xml');
+    const tags = (node, name) => [...node.getElementsByTagName(name)];
+    const strings = tags(await xml('xl/sharedStrings.xml'), 'si').map(si => tags(si, 't').filter(t => t.parentNode.nodeName !== 'rPh').map(t => t.textContent).join(''));
+    const rels = {};
+    tags(await xml('xl/_rels/workbook.xml.rels'), 'Relationship').forEach(r => { rels[r.getAttribute('Id')] = r.getAttribute('Target').replace(/^\/?(xl\/)?/, 'xl/'); });
+    const out = {};
+    for (const sh of tags(await xml('xl/workbook.xml'), 'sheet')) {
+      const rows = [];
+      tags(await xml(rels[sh.getAttribute('r:id')]), 'c').forEach(c => {
+        const ref = c.getAttribute('r').match(/^([A-Z]+)(\d+)$/), type = c.getAttribute('t'), v = tags(c, 'v')[0];
+        const value = type === 's' ? strings[+v.textContent] : type === 'inlineStr' ? tags(c, 't').map(t => t.textContent).join('') : v ? v.textContent : '';
+        if (value === '' || value == null) return;
+        const col = [...ref[1]].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0) - 1, row = +ref[2] - 1;
+        (rows[row] = rows[row] || [])[col] = String(value);
+      });
+      out[sh.getAttribute('name')] = Array.from(rows, r => Array.from(r || [], v => v || ''));
+    }
+    return out;
   }
 
-  const dayTimes = s => {
-    const m = String(s || '').match(/(\d{1,2})[:.]?(\d{2})?\s*(?:-|–|to)\s*(\d{1,2})[:.]?(\d{2})?/i);
-    if (!m) return null;
-    const start = +m[1] * 60 + +(m[2] || 0), end = +m[3] * 60 + +(m[4] || 0);
-    return end > start && end <= 24 * 60 ? { on: true, start, end } : null;
-  };
-  const holidays = s => String(s || '').split(/[;\n]/).map(part => {
-    const d = part.match(/\d{4}-\d{2}-\d{2}/g);
-    return d ? { from: d[0], to: d[1] || d[0], note: '' } : null;
-  }).filter(Boolean);
+  // ---------- free-text times ----------
+  // Reads cells such as "7:30AM - 03:30PM (8hrs)", "9-4:30pm" or "11:30PM - 07:30PM (8hrs)" (a typo for AM).
+  // When the AM/PM written cannot be right, the reading that fits a working day and any "(8hrs)" hint is used.
+  const RANGE = /(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?\s*-?\s*(?:-|–|to)\s*-?\s*(\d{1,2})(?:[:.](\d{2}))?\s*-?\s*(am|pm)?/g;
+  function parseTimes(raw) {
+    const text = String(raw == null ? '' : raw).toLowerCase(), hint = (text.match(/\((\d+(?:\.\d+)?)\s*hr/) || [])[1];
+    const found = [];
+    for (const m of text.replace(/\(.*?(\)|$)/g, ' ').matchAll(RANGE)) {
+      const mins = (h, mm, mer) => (+h > 12 ? +h : (+h % 12) + (mer === 'pm' ? 12 : 0)) * 60 + +(mm || 0);
+      let best = null;
+      for (const a of ['am', 'pm']) for (const b of ['am', 'pm']) {
+        const start = mins(m[1], m[2], a), end = mins(m[4], m[5], b), dur = (end - start) / 60;
+        if (dur <= 0 || dur > 14) continue;
+        const score = (m[3] === a ? 4 : 0) + (m[6] === b ? 4 : 0) + (!m[3] && a === b ? 0.5 : 0) - (start < 360 || end > 1320 ? 6 : 0) - (hint ? Math.abs(dur - hint) : dur / 100);
+        if (!best || score > best.score) best = { start, end, score, changed: (m[3] && m[3] !== a && +m[1] <= 12) || (m[6] && m[6] !== b && +m[4] <= 12) };
+      }
+      if (best) found.push(best);
+    }
+    if (!found.length) return null;
+    const pick = found.reduce((x, y) => y.end - y.start > x.end - x.start ? y : x);
+    return { on: true, start: pick.start, end: pick.end, changed: !!pick.changed, several: found.length > 1 };
+  }
+  const NOT_WORKING = ['', 'na', 'off', 'notavailable', 'x'];
 
-  // Reads rows (first row = headers) into people. Only the columns that are present are used.
+  // ---------- the "Available Working Hours" workbook layout ----------
+  // One tab per team. Each person is a block: a row with their name and the day names, then one row
+  // per rotation week ("WEEK 1", "WEEK 2 & 4", "Weekly"). A "Weekly Shifts" tab lists the cover needed.
+  const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const dayIndex = v => DAY_KEYS.findIndex(d => norm(v).startsWith(d));
+  const dayCols = row => { const cols = {}; (row || []).forEach((v, i) => { const d = dayIndex(v); if (d >= 0 && String(v).trim().length < 16 && !(d in cols)) cols[d] = i; }); return Object.keys(cols).length >= 5 ? cols : null; };
+  const tidyName = s => { const n = String(s).replace(/\(.*?\)/g, ' ').replace(/\bp\/t\b/ig, ' ').replace(/\s+/g, ' ').trim(); return n === n.toUpperCase() ? n.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : n; };
+  const weeksOf = label => {
+    const l = String(label).toLowerCase();
+    if (/^\s*weekly|\bweek\s*1\s*-\s*4/.test(l)) return [0, 1, 2, 3];
+    const m = l.match(/\bweek\s*([1-4](?:\s*(?:&|,|and)\s*[1-4])*)/);
+    return m ? [...new Set(m[1].match(/[1-4]/g).map(n => n - 1))] : null;
+  };
+
+  function readWorkbook(book) {
+    const people = new Map(), notes = [], skipped = [], needs = {}, cellNotes = new Map();
+    const cellNote = (name, label, d, c, text) => { const k = [name, d, c, text].join('|'); if (!cellNotes.has(k)) cellNotes.set(k, { name, d, c, text, labels: [] }); cellNotes.get(k).labels.push(label); };
+    for (const [tab, rows] of Object.entries(book)) {
+      if (/shift/i.test(tab)) { readNeeds(rows, needs); continue; }
+      const key = norm(tab), role = roleOf(tab), treatment = /acupunct/.test(key) ? treatmentOf('Acupuncture') : null;
+      if (!role) { if (rows.some(r => dayCols(r))) skipped.push(tab.trim()); continue; }
+      for (let i = 0; i < rows.length; i++) {
+        const cols = dayCols(rows[i]), name = cols && tidyName(rows[i][0] || '');
+        if (!cols || !name || roleOf(name) || /barista|attendant|shift|^week/i.test(name)) continue;
+        const lastDay = Math.max(...Object.values(cols)), weeks = [null, null, null, null], extra = [], said = [], labelled = new Set();
+        const weeksRows = [];
+        const remember = r => r.slice(lastDay + 1).forEach(v => { if (String(v).trim() && !said.includes(String(v).trim())) said.push(String(v).trim()); });
+        remember(rows[i]);
+        let j = i + 1;
+        for (; j < rows.length && !dayCols(rows[j]); j++) {
+          const r = rows[j] || [], label = String(r[0] || '').trim(), wks = weeksOf(label), cells = DAY_KEYS.map((_, d) => String(r[cols[d]] == null ? '' : r[cols[d]]).trim());
+          remember(r);
+          if (!wks) { if (cells.some(c => c) || label) extra.push({ label: label || 'a row with no label', cells }); continue; }
+          weeksRows.push({ label, wks, cells });
+        }
+        // a block with no "WEEK" rows at all: take its first row of times as the pattern for every week
+        if (!weeksRows.length) {
+          const k = extra.findIndex(e => e.cells.some(c => parseTimes(c)));
+          if (k >= 0) { const e = extra.splice(k, 1)[0]; weeksRows.push({ label: 'every week', wks: [0, 1, 2, 3], cells: e.cells }); notes.push(`${name} (${tab.trim()}): the row of times had no week label, so it was read as the same every week.`); }
+        }
+        weeksRows.forEach(({ label, wks, cells }) => {
+          const pattern = cells.map((c, d) => {
+            const tm = parseTimes(c);
+            if (!tm) { if (!NOT_WORKING.includes(norm(c))) cellNote(name, label, d, c, 'was not understood, so it was left as not working'); return { on: false, start: 540, end: 1020 }; }
+            if (tm.changed) cellNote(name, label, d, c, `was read as ${D.hhmm(tm.start)}–${D.hhmm(tm.end)}`);
+            if (tm.several) cellNote(name, label, d, c, `has more than one time range; the longest (${D.hhmm(tm.start)}–${D.hhmm(tm.end)}) was used`);
+            return { on: true, start: tm.start, end: tm.end };
+          });
+          wks.forEach(w => { weeks[w] = pattern; labelled.add(w); });
+        });
+        if (extra.length) notes.push(`${name} (${tab.trim()}): ${extra.length} row${extra.length > 1 ? 's' : ''} under this name ${extra.length > 1 ? 'were' : 'was'} not read because ${extra.length > 1 ? 'they are' : 'it is'} not labelled as a week: ${extra.map(e => `“${e.label}”`).join(', ')}. Check by hand; a note just above the next person may belong to them.`);
+        // one labelled week means the same every week; otherwise unlisted weeks are weeks off
+        const patterns = labelled.size <= 1 ? [weeks.find(Boolean) || D.offWeek()] : weeks.map(w => w || D.offWeek());
+        const single = patterns.every(p => JSON.stringify(p) === JSON.stringify(patterns[0])) ? [patterns[0]] : patterns;
+        const weekly = single.map(p => p.reduce((s, d) => s + (d.on ? d.end - d.start : 0), 0) / 60);
+        const stated = said.map(s => (s.match(/(\d+(?:\.\d+)?)\s*(?:hours|hrs|hr)\b(?!\s*(?:\/|per)\s*day)/i) || [])[1] || (/^\d+(\.0)?$/.test(s) && +s >= 4 && +s <= 60 ? s : null)).find(Boolean);
+        const hours = stated ? +stated : Math.min(48, Math.round(Math.max(...weekly)));
+        if (!stated && Math.max(...weekly) > 0) notes.push(`${name}: no weekly hours were stated, so ${hours} h was taken from the availability listed.`);
+        if (Math.max(...weekly) === 0) notes.push(`${name} (${tab.trim()}) has no availability listed, so cannot be scheduled until hours are added on the Team tab.`);
+        const p = { name, primary: role, skills: [role], hours, patterns: single, treatments: treatment ? [treatment] : [], note: said.filter(s => !/^\d+(\.0)?$/.test(s)).join(' · ') };
+        const id = norm(name), prev = people.get(id);
+        if (!prev) people.set(id, p);
+        else {
+          // the same name on two tabs: one person trained in both areas
+          notes.push(`${name} is on more than one tab, so was treated as one person trained for ${D.role(prev.primary).name} and ${D.role(role).name}. Split them on the Team tab if they are different people.`);
+          if (!prev.skills.includes(role)) prev.skills.push(role);
+          prev.treatments = [...new Set(prev.treatments.concat(p.treatments))];
+          prev.hours = Math.max(prev.hours, p.hours);
+          prev.note = [prev.note, p.note].filter(Boolean).join(' · ');
+          const four = x => x.patterns.length === 1 ? [0, 1, 2, 3].map(() => x.patterns[0]) : x.patterns;
+          const merged = four(prev).map((wkA, w) => wkA.map((a, d) => { const b = four(p)[w][d]; return !a.on ? b : !b.on ? a : { on: true, start: Math.min(a.start, b.start), end: Math.max(a.end, b.end) }; }));
+          prev.patterns = merged.every(m => JSON.stringify(m) === JSON.stringify(merged[0])) ? [merged[0]] : merged;
+        }
+        i = j - 1;
+      }
+    }
+    for (const n of cellNotes.values()) notes.unshift(`${n.name}, ${D.DAYS[n.d]} (${[...new Set(n.labels)].join(', ').toLowerCase()}): “${n.c}” ${n.text}.`);
+    if (Object.keys(needs).length && !needs.studio) { needs.studio = D.DAYS.map(() => []); notes.push('The Weekly Shifts tab lists no cover for the Studio, so Studio cover was set to none. Add it on the Coverage needs tab if the studio needs staffing.'); }
+    if (skipped.length) notes.push(`These tabs were not imported because they are not one of the four teams: ${skipped.join(', ')}.`);
+    return { people: [...people.values()], notes, needs };
+  }
+
+  // Cover needed, from rows such as "FOH (OPEN)", "THERAPIST 2" or "BARISTA/ATTENDANT 1".
+  function readNeeds(rows, needs) {
+    const head = rows.findIndex(r => dayCols(r));
+    if (head < 0) return;
+    const cols = dayCols(rows[head]), first = Math.min(...Object.values(cols));
+    rows.slice(head + 1).forEach(r => {
+      const label = (r || []).slice(0, first).join(' ');
+      const role = /foh|front/i.test(label) ? 'foh' : /therap/i.test(label) ? 'therapy' : /barista|attendant|caf/i.test(label) ? 'cafe' : /studio|instructor/i.test(label) ? 'studio' : null;
+      if (!role) return;
+      needs[role] = needs[role] || D.DAYS.map(() => []);
+      DAY_KEYS.forEach((_, d) => {
+        const tm = parseTimes(r[cols[d]]);
+        if (!tm) return;
+        const same = needs[role][d].find(b => b.start === tm.start && b.end === tm.end);
+        if (same) same.count++; else needs[role][d].push({ start: tm.start, end: tm.end, count: 1 });
+      });
+    });
+    Object.values(needs).forEach(days => days.forEach(list => list.sort((a, b) => a.start - b.start)));
+  }
+
+  // ---------- the simple one-row-per-person layout ----------
+  const holidays = s => String(s || '').split(/[;\n]/).map(part => { const d = part.match(/\d{4}-\d{2}-\d{2}/g); return d ? { from: d[0], to: d[1] || d[0], note: '' } : null; }).filter(Boolean);
   function readPeople(rows) {
     if (rows.length < 2) throw new Error('The sheet needs a header row and at least one person.');
     const head = rows[0].map(norm), find = (...names) => head.findIndex(h => names.includes(h));
-    const cName = find('name', 'teammember', 'staff', 'employee', 'staffname'), cPrimary = find('primaryrole', 'role', 'primary', 'area', 'mainrole', 'department');
-    const cSkills = find('skills', 'skill', 'canwork', 'trainedfor', 'roles'), cHours = find('hours', 'weeklyhours', 'contractedhours', 'hoursperweek', 'contracthours'), cHol = find('holidays', 'holiday', 'leave', 'timeoff');
-    const cDay = D.DAYS.map((d, i) => find(norm(d), norm(D.DAY_NAMES[i])));
+    const cName = find('name', 'teammember', 'staff', 'employee', 'staffname'), cPrimary = find('primaryrole', 'role', 'primary', 'area', 'mainrole', 'mainarea', 'department');
+    const cSkills = find('skills', 'skill', 'canwork', 'trainedfor', 'roles', 'areas'), cHours = find('hours', 'weeklyhours', 'contractedhours', 'hoursperweek', 'contracthours');
+    const cHol = find('holidays', 'holiday', 'leave', 'timeoff'), cTreat = find('treatments', 'treatment', 'treatmenttypes', 'therapies');
+    const cDay = D.DAYS.map((d, i) => head.findIndex(h => h === norm(D.DAY_NAMES[i]) || (h.length <= 5 && h.startsWith(DAY_KEYS[i]))));
     const cRole = {};
-    head.forEach((h, i) => { const r = roleOf(h); if (r && i !== cPrimary && i !== cSkills) cRole[r] = i; });
-    if (cName < 0) throw new Error('The sheet needs a column called "Name".');
-    if (cSkills < 0 && !Object.keys(cRole).length && cPrimary < 0) throw new Error('The sheet needs a "Skills" column (for example "Café, Front of House") or one column per area.');
+    head.forEach((h, i) => { const r = roleOf(h); if (r && i !== cPrimary && i !== cSkills && i !== cTreat) cRole[r] = i; });
+    if (cName < 0) throw new Error('The sheet needs a column called “Name”, or the tab-per-team layout with a block for each person.');
+    if (cSkills < 0 && !Object.keys(cRole).length && cPrimary < 0) throw new Error('The sheet needs a “Skills” column (for example “Café, Front of House”) or one column per area.');
     const people = [], notes = [];
     rows.slice(1).forEach((r, n) => {
       const name = (r[cName] || '').trim();
       if (!name) return;
       const p = { name }, skills = new Set();
-      if (cSkills >= 0) String(r[cSkills] || '').split(/[,;/&+]|\band\b/i).forEach(s => { if (!s.trim()) return; const id = roleOf(s); if (id) skills.add(id); else notes.push(`Row ${n + 2}: did not recognise the skill "${s.trim()}".`); });
+      if (cSkills >= 0) String(r[cSkills] || '').split(/[,;/+]|\band\b/i).forEach(s => { if (!s.trim()) return; const id = roleOf(s); if (id) skills.add(id); else notes.push(`Row ${n + 2}: the skill “${s.trim()}” was not recognised.`); });
       Object.keys(cRole).forEach(id => { if (truthy(r[cRole[id]])) skills.add(id); });
-      if (cPrimary >= 0 && (r[cPrimary] || '').trim()) { const id = roleOf(r[cPrimary]); if (id) { p.primary = id; skills.add(id); } else notes.push(`Row ${n + 2}: did not recognise the role "${r[cPrimary].trim()}".`); }
+      if (cPrimary >= 0 && (r[cPrimary] || '').trim()) { const id = roleOf(r[cPrimary]); if (id) { p.primary = id; skills.add(id); } else notes.push(`Row ${n + 2}: the role “${r[cPrimary].trim()}” was not recognised.`); }
       if (skills.size) p.skills = [...skills];
+      if (cTreat >= 0) p.treatments = String(r[cTreat] || '').split(/[,;]/).map(s => s.trim()).filter(Boolean).map(s => { const t = treatmentOf(s); if (!t) notes.push(`Row ${n + 2}: the treatment “${s}” is not on the treatment list (Coverage needs tab).`); return t; }).filter(Boolean);
       if (cHours >= 0 && isFinite(parseFloat(r[cHours]))) p.hours = parseFloat(r[cHours]);
-      if (cDay.some(c => c >= 0)) p.days = cDay.map(c => (c >= 0 && dayTimes(r[c])) || { on: false, start: 540, end: 1020 });
+      if (cDay.some(c => c >= 0)) p.patterns = [cDay.map(c => { const tm = c >= 0 && parseTimes(r[c]); return tm ? { on: true, start: tm.start, end: tm.end } : { on: false, start: 540, end: 1020 }; })];
       if (cHol >= 0) p.holidays = holidays(r[cHol]);
       people.push(p);
     });
     if (!people.length) throw new Error('No rows with a name were found.');
-    return { people, notes };
+    return { people, notes, needs: {} };
+  }
+
+  // Works out which layout a file uses and reads it.
+  function readAny(book) {
+    const tabs = Object.values(book);
+    const flat = tabs.find(rows => rows[0] && rows[0].some(v => ['name', 'teammember', 'staff', 'employee', 'staffname'].includes(norm(v))));
+    if (flat) return readPeople(flat);
+    const result = readWorkbook(book);
+    if (!result.people.length) throw new Error('No team members were found. The sheet needs either a “Name” column, or a tab per team with a block for each person (name, then the days of the week across the top).');
+    return result;
+  }
+
+  // ---------- import ----------
+  async function fetchSheet(url) {
+    const id = (String(url).match(/\/spreadsheets\/d\/([\w-]+)/) || [])[1];
+    if (!id) throw new Error('That does not look like a Google Sheets link. Copy the address from the browser while the sheet is open.');
+    try {
+      const res = await fetch(`https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`), buf = await res.arrayBuffer();
+      if (res.ok && new Uint8Array(buf)[0] === 0x50) return readXlsx(buf);
+    } catch (e) { /* fall through to the message below */ }
+    throw new Error('Could not read the sheet. In Google Sheets choose Share → General access → “Anyone with the link” (Viewer) and try again. Or choose File → Download → Microsoft Excel and use “Import a file”, which keeps the sheet private.');
+  }
+  async function readFile(file) {
+    if (/\.csv$/i.test(file.name)) return { [file.name]: parseCsv(await file.text()) };
+    return readXlsx(await file.arrayBuffer());
   }
 
   // Merge imported people into the team, matching on name. Fields missing from the sheet are left alone.
-  function applyPeople(people) {
+  // A sample-only team is replaced rather than merged into.
+  function apply(result) {
     let added = 0, updated = 0;
-    people.forEach(p => {
+    const replaced = D.state.staff.length > 0 && D.state.staff.every(s => /\(sample\)/.test(s.name));
+    if (replaced) { D.state.staff = []; D.state.weeks = {}; }
+    result.people.forEach(p => {
       const cur = D.state.staff.find(s => norm(s.name) === norm(p.name));
       if (cur) {
         Object.assign(cur, p);
-        if (p.skills && !p.primary && !cur.skills.includes(cur.primary)) cur.primary = cur.skills[0];
-        if (!cur.skills.includes(cur.primary)) cur.skills.unshift(cur.primary);
+        if (!cur.skills.includes(cur.primary)) cur.primary = cur.skills[0];
+        D.normalise(cur);
         updated++;
       } else {
         const primary = p.primary || (p.skills && p.skills[0]) || 'foh';
@@ -105,28 +274,31 @@ const Sheets = (function () {
         added++;
       }
     });
+    const areas = Object.keys(result.needs || {});
+    areas.forEach(r => { D.state.needs[r] = result.needs[r]; });
     D.save();
-    return { added, updated };
+    return { added, updated, replaced, areas };
   }
 
-  const TEMPLATE = [['Name', 'Primary role', 'Skills', 'Hours', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Holidays'],
-    ['Example Person', 'Studio', 'Studio, Front of House', '30', '08:00-16:00', '08:00-16:00', '', '08:00-16:00', '08:00-16:00', '', '', '2026-12-24 to 2026-12-31'],
-    ['Another Person', 'Café', 'Café', '20', '', '', '09:00-17:00', '09:00-17:00', '', '09:00-17:00', '', '']];
+  const TEMPLATE = [['Name', 'Primary role', 'Skills', 'Treatments', 'Hours', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Holidays'],
+    ['Example Person', 'Studio', 'Studio, Front of House', '', '30', '08:00-16:00', '08:00-16:00', '', '08:00-16:00', '08:00-16:00', '', '', '2026-12-24 to 2026-12-31'],
+    ['Another Person', 'Therapist', 'Therapist', 'Massage, Reflexology', '20', '', '', '09:00-17:00', '09:00-17:00', '', '09:00-17:00', '', '']];
 
   // ---------- export ----------
+  const shiftLabel = s => `${D.hhmm(s.start)}–${D.hhmm(s.end)} ${s.treatment || D.role(s.role).short}`;
   function build(wk) {
     const shifts = D.shifts(wk), dates = D.weekDates(wk), label = d => `${D.DAYS[d]} ${D.nice(dates[d])}`;
     const rota = [['Team member', 'Primary role'].concat(D.DAYS.map((_, d) => label(d)), ['Hours'])];
     D.ROLES.forEach(r => D.state.staff.filter(p => p.primary === r.id).forEach(p => {
       rota.push([p.name, r.name].concat(D.DAYS.map((_, d) => {
         const mine = shifts.filter(s => s.staffId === p.id && s.day === d).sort((a, b) => a.start - b.start);
-        if (mine.length) return mine.map(s => `${D.hhmm(s.start)}–${D.hhmm(s.end)} ${D.role(s.role).short}`).join('\n');
+        if (mine.length) return mine.map(shiftLabel).join('\n');
         return Engine.onHoliday(p, dates[d]) ? 'Holiday' : '';
       }), [String(D.hrs(Engine.minutes(shifts, p.id)))]));
     }));
-    const list = [['Date', 'Day', 'Team member', 'Area', 'Start', 'End', 'Hours']].concat(shifts.slice().sort((a, b) => a.day - b.day || a.start - b.start).map(s =>
-      [dates[s.day], D.DAY_NAMES[s.day], (D.person(s.staffId) || { name: '?' }).name, D.role(s.role).name, D.hhmm(s.start), D.hhmm(s.end), String(D.hrs(s.end - s.start))]));
-    const gaps = [['Day', 'Area', 'From', 'To', 'People short']].concat(Engine.gaps(wk).map(g => [label(g.day), D.role(g.role).name, D.hhmm(g.start), D.hhmm(g.end), String(g.short)]));
+    const list = [['Date', 'Day', 'Team member', 'Area', 'Treatment', 'Start', 'End', 'Hours']].concat(shifts.slice().sort((a, b) => a.day - b.day || a.start - b.start).map(s =>
+      [dates[s.day], D.DAY_NAMES[s.day], (D.person(s.staffId) || { name: '?' }).name, D.role(s.role).name, s.treatment || '', D.hhmm(s.start), D.hhmm(s.end), String(D.hrs(s.end - s.start))]));
+    const gaps = [['Day', 'Area', 'Treatment', 'From', 'To', 'People short']].concat(Engine.gaps(wk).map(g => [label(g.day), D.role(g.role).name, g.treatment || '', D.hhmm(g.start), D.hhmm(g.end), String(g.short)]));
     return { week: wk, rota, shifts: list, gaps };
   }
 
@@ -180,5 +352,5 @@ function write(ss, name, rows, wrap) {
 }
 `;
 
-  return { parseCsv, toCsv, toTsv, fetchSheet, readPeople, applyPeople, build, send, TEMPLATE, SCRIPT };
+  return { parseCsv, toCsv, toTsv, readXlsx, parseTimes, readWorkbook, readPeople, readAny, fetchSheet, readFile, apply, build, send, shiftLabel, TEMPLATE, SCRIPT };
 })();
