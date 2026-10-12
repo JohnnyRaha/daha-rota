@@ -239,9 +239,10 @@
   function trybePanel() {
     let html = '<h4>Send straight to Trybe</h4>';
     html += Trybe.connected
-      ? `<p><span class="pill ok">Connected</span> ${Trybe.ENV_NAMES[Trybe.env]}${Trybe.kept ? ' · token remembered on this computer' : ' · token forgotten when this tab closes'} <button class="quiet" data-act="trybeforget">Disconnect and forget the token</button></p>`
+      ? Trybe.env === 'demo' ? '<p><span class="pill ok">Demo</span> Using a simulated Trybe built from your team. Nothing is sent anywhere. <button class="quiet" data-act="trybeforget">Leave the demo</button></p>'
+        : `<p><span class="pill ok">Connected</span> ${Trybe.ENV_NAMES[Trybe.env]}${Trybe.kept ? ' · token remembered on this computer' : ' · token forgotten when this tab closes'} <button class="quiet" data-act="trybeforget">Disconnect and forget the token</button></p>`
       : '<p class="muted">Not connected. You will be asked for your Trybe API token the first time.</p>';
-    html += `<div class="btns"><button class="primary" data-act="trybecheck">${trybePlan && trybePlan.wk === wk ? 'Check again' : 'Check against Trybe'}</button></div>`;
+    html += `<div class="btns"><button class="primary" data-act="trybecheck">${trybePlan && trybePlan.wk === wk ? 'Check again' : 'Check against Trybe'}</button>${Trybe.connected ? '' : '<button data-act="trybedemo">Try it with a simulated Trybe (no token needed)</button>'}</div>`;
     if (trybeMsg) html += `<p class="${/^(Checking|Sending)/.test(trybeMsg) ? 'muted' : 'warn'}">${esc(trybeMsg)}</p>`;
     const p = trybePlan && trybePlan.wk === wk && trybePlan.env === Trybe.env ? trybePlan : null;
     if (p) {
@@ -386,12 +387,13 @@
     trybejson() { download(`daha-trybe-rotas-${wk}.json`, JSON.stringify(Sheets.trybe(wk, trybeRoles()), null, 2), 'application/json'); return false; },
     trybecsv() { download(`daha-trybe-rotas-${wk}.csv`, '\ufeff' + Sheets.toCsv(Sheets.trybeRows(Sheets.trybe(wk, trybeRoles()))), 'text/csv'); return false; },
     trybecheck() { if (Trybe.connected) trybeCheck(); else tokenDialog(trybeCheck); return false; },
-    trybeforget() { Trybe.forget(); trybePlan = null; trybeResults = null; trybeMsg = ''; toast('Disconnected. The token has been removed from this browser.'); },
+    trybedemo() { Trybe.startDemo(); trybePlan = null; trybeResults = null; trybeCheck(); return false; },
+    trybeforget() { const was = Trybe.env; Trybe.forget(); trybePlan = null; trybeResults = null; trybeMsg = ''; toast(was === 'demo' ? 'Left the demo.' : 'Disconnected. The token has been removed from this browser.'); },
     async trybesend() {
       const n = trybePlan.rows.filter(r => r.id && r.action !== 'skip').length;
       if (!confirm(`Send ${n} rota${n === 1 ? '' : 's'} to Trybe ${Trybe.ENV_NAMES[trybePlan.env]}, starting ${D.nice(wk)}?` + (trybePlan.env === 'live' ? '\n\nThis changes real availability for bookings.' : ''))) return false;
       trybeMsg = 'Sending…'; render();
-      try { trybeResults = await Trybe.send(trybePlan); trybeMsg = ''; trybePlan = null; toast(`${trybeResults.filter(r => r.ok).length} of ${trybeResults.length} rotas sent to Trybe.`, trybeResults.some(r => !r.ok)); }
+      try { trybeResults = await Trybe.send(trybePlan); trybeMsg = ''; trybePlan = null; toast(`${trybeResults.filter(r => r.ok).length} of ${trybeResults.length} rotas sent to ${Trybe.env === 'demo' ? 'the simulated Trybe. Press Check again to see them there.' : 'Trybe.'}`, trybeResults.some(r => !r.ok)); }
       catch (e) { trybeMsg = e.message; }
     },
     backup() { download(`daha-rota-backup-${D.today()}.json`, JSON.stringify(D.state), 'application/json'); return false; },
