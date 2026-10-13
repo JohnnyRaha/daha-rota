@@ -269,7 +269,7 @@
     const dlg = $('dialog');
     dlg.onchange = null;
     dlg.innerHTML = `<form method="dialog"><h3>Connect to Trybe</h3>
-      <p>Paste an API token from your Trybe account. If you do not have one, ask Trybe support for an API token that can manage practitioner schedules.</p>
+      <p>Paste your Trybe API token. Tokens are not created inside Trybe: email <b>tech-support@try.be</b> and ask for an API key, giving the email of the Trybe user it should belong to, the environment (playground, production or both) and what it is for. A token works in one environment only and can do whatever that user can do, so the user needs permission to manage schedules.</p>
       <label>API token<input type="password" name="token" autocomplete="off" spellcheck="false"></label>
       <label>Environment<select name="env"><option value="playground">Playground (test) — safe to try</option><option value="live">Live — real rotas and bookings</option></select></label>
       <label class="chk"><input type="checkbox" name="keep"> Remember the token on this computer</label>
