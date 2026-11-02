@@ -229,3 +229,27 @@ ul.log { margin: 10px 0; padding: 10px 12px 10px 28px; border-radius: 6px; backg
 dialog p { margin: 0 0 12px; }
 dialog label.chk { margin-bottom: 4px; }
 button:disabled { opacity: .5; cursor: default; }
+
+/* ---------- working hours, split shifts, breaks, backups ---------- */
+#backup-btn { margin-left: 10px; padding: 3px 12px; border: 1px solid var(--line); border-radius: 5px; background: var(--white); line-height: 1.2; text-align: left; }
+#backup-btn small { font-size: 10.5px; }
+#backup-btn.warn { border-color: var(--alert); color: var(--alert); }
+#backup-btn.warn small { color: var(--alert); }
+button.mini { display: block; margin-top: 3px; padding: 0 6px; font-size: 11px; }
+.rota td.gapcell { padding: 3px 4px; }
+.rota td.gapcell .pill { display: block; margin: 2px auto; font-size: 11px; cursor: pointer; }
+.rota td.gapcell small { display: block; color: var(--alert); text-align: center; }
+.shift small.brk { color: var(--muted); font-weight: 400; }
+td.tblocks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tblock { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 6px; background: var(--paper); }
+.tblock input[type=time] { padding: 3px 4px; }
+.tblock select { padding: 3px 4px; max-width: 140px; }
+.days td { vertical-align: middle; }
+.breakrow { margin: 4px 0 10px; }
+.breakrow label { margin-bottom: 4px; }
+.breakrow small { display: block; }
+.brules td { padding: 3px 8px 3px 0; }
+.brules input[type=number] { width: 72px; }
+dialog form.wide { min-width: min(560px, 90vw); }
+dialog:has(form.wide) { width: min(620px, 94vw); }
+.snaps td { white-space: normal; font-size: 13px; padding: 5px 8px; }

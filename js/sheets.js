@@ -92,7 +92,10 @@ const Sheets = (function () {
     }
     if (!found.length) return null;
     const pick = found.reduce((x, y) => y.end - y.start > x.end - x.start ? y : x);
-    return { on: true, start: pick.start, end: pick.end, changed: !!pick.changed, several: found.length > 1 };
+    // every range, in order, with overlapping ones joined: "9:45-11:15 & 12:45-2:45pm" becomes a split shift
+    const ranges = [];
+    found.slice().sort((a, b) => a.start - b.start).forEach(r => { const last = ranges[ranges.length - 1]; if (last && r.start <= last.end) last.end = Math.max(last.end, r.end); else ranges.push({ start: r.start, end: r.end }); });
+    return { on: true, start: pick.start, end: pick.end, ranges, changed: found.some(f => f.changed), several: ranges.length > 1 };
   }
   const NOT_WORKING = ['', 'na', 'off', 'notavailable', 'x'];
 
@@ -139,10 +142,10 @@ const Sheets = (function () {
         weeksRows.forEach(({ label, wks, cells }) => {
           const pattern = cells.map((c, d) => {
             const tm = parseTimes(c);
-            if (!tm) { if (!NOT_WORKING.includes(norm(c))) cellNote(name, label, d, c, 'was not understood, so it was left as not working'); return { on: false, start: 540, end: 1020 }; }
-            if (tm.changed) cellNote(name, label, d, c, `was read as ${D.hhmm(tm.start)}–${D.hhmm(tm.end)}`);
-            if (tm.several) cellNote(name, label, d, c, `has more than one time range; the longest (${D.hhmm(tm.start)}–${D.hhmm(tm.end)}) was used`);
-            return { on: true, start: tm.start, end: tm.end };
+            if (!tm) { if (!NOT_WORKING.includes(norm(c))) cellNote(name, label, d, c, 'was not understood, so it was left as not working'); return D.off(); }
+            if (tm.several) cellNote(name, label, d, c, `was read as a split shift: ${Engine.spans(tm.ranges)}`);
+            else if (tm.changed) cellNote(name, label, d, c, `was read as ${Engine.spans(tm.ranges)}`);
+            return { on: true, blocks: tm.ranges };
           });
           wks.forEach(w => { weeks[w] = pattern; labelled.add(w); });
         });
@@ -150,7 +153,7 @@ const Sheets = (function () {
         // one labelled week means the same every week; otherwise unlisted weeks are weeks off
         const patterns = labelled.size <= 1 ? [weeks.find(Boolean) || D.offWeek()] : weeks.map(w => w || D.offWeek());
         const single = patterns.every(p => JSON.stringify(p) === JSON.stringify(patterns[0])) ? [patterns[0]] : patterns;
-        const weekly = single.map(p => p.reduce((s, d) => s + (d.on ? d.end - d.start : 0), 0) / 60);
+        const weekly = single.map(p => p.reduce((s, d) => s + D.blocksOf(d).reduce((t, b) => t + b.end - b.start, 0), 0) / 60);
         const stated = said.map(s => (s.match(/(\d+(?:\.\d+)?)\s*(?:hours|hrs|hr)\b(?!\s*(?:\/|per)\s*day)/i) || [])[1] || (/^\d+(\.0)?$/.test(s) && +s >= 4 && +s <= 60 ? s : null)).find(Boolean);
         const hours = stated ? +stated : Math.min(48, Math.round(Math.max(...weekly)));
         if (!stated && Math.max(...weekly) > 0) notes.push(`${name}: no weekly hours were stated, so ${hours} h was taken from the availability listed.`);
@@ -165,8 +168,14 @@ const Sheets = (function () {
           prev.treatments = [...new Set(prev.treatments.concat(p.treatments))];
           prev.hours = Math.max(prev.hours, p.hours);
           prev.note = [prev.note, p.note].filter(Boolean).join(' · ');
-          const four = x => x.patterns.length === 1 ? [0, 1, 2, 3].map(() => x.patterns[0]) : x.patterns;
-          const merged = four(prev).map((wkA, w) => wkA.map((a, d) => { const b = four(p)[w][d]; return !a.on ? b : !b.on ? a : { on: true, start: Math.min(a.start, b.start), end: Math.max(a.end, b.end) }; }));
+          // keep both sets of hours as blocks, each marked with the area it came from
+          const four = x => [0, 1, 2, 3].map(i => x.patterns[i % x.patterns.length]);
+          const tag = (d, r) => D.blocksOf(d).map(b => Object.assign({}, b, { role: b.role || r }));
+          const merged = four(prev).map((wkA, w) => wkA.map((a, d) => {
+            const blocks = [];
+            tag(a, prev.primary).concat(tag(four(p)[w][d], role)).sort((x, y) => x.start - y.start).forEach(b => { const last = blocks[blocks.length - 1]; if (last && b.start < last.end) last.end = Math.max(last.end, b.end); else blocks.push(b); });
+            return blocks.length ? { on: true, blocks } : D.off();
+          }));
           prev.patterns = merged.every(m => JSON.stringify(m) === JSON.stringify(merged[0])) ? [merged[0]] : merged;
         }
         i = j - 1;
@@ -222,7 +231,7 @@ const Sheets = (function () {
       if (skills.size) p.skills = [...skills];
       if (cTreat >= 0) p.treatments = String(r[cTreat] || '').split(/[,;]/).map(s => s.trim()).filter(Boolean).map(s => { const t = treatmentOf(s); if (!t) notes.push(`Row ${n + 2}: the treatment “${s}” is not on the treatment list (Coverage needs tab).`); return t; }).filter(Boolean);
       if (cHours >= 0 && isFinite(parseFloat(r[cHours]))) p.hours = parseFloat(r[cHours]);
-      if (cDay.some(c => c >= 0)) p.patterns = [cDay.map(c => { const tm = c >= 0 && parseTimes(r[c]); return tm ? { on: true, start: tm.start, end: tm.end } : { on: false, start: 540, end: 1020 }; })];
+      if (cDay.some(c => c >= 0)) p.patterns = [cDay.map(c => { const tm = c >= 0 && parseTimes(r[c]); return tm ? { on: true, blocks: tm.ranges } : D.off(); })];
       if (cHol >= 0) p.holidays = holidays(r[cHol]);
       people.push(p);
     });
@@ -285,19 +294,21 @@ const Sheets = (function () {
     ['Another Person', 'Therapist', 'Therapist', 'Massage, Reflexology', '20', '', '', '09:00-17:00', '09:00-17:00', '', '09:00-17:00', '', '']];
 
   // ---------- export ----------
-  const shiftLabel = s => `${D.hhmm(s.start)}–${D.hhmm(s.end)} ${s.treatment || D.role(s.role).short}`;
+  const shiftLabel = (s, idx) => { const b = idx && Engine.breakIn(s, idx); return `${D.hhmm(s.start)}–${D.hhmm(s.end)} ${s.treatment || D.role(s.role).short}` + (b ? ` (break ${D.hhmm(b.start)}–${D.hhmm(b.end)})` : ''); };
   function build(wk) {
-    const shifts = D.shifts(wk), dates = D.weekDates(wk), label = d => `${D.DAYS[d]} ${D.nice(dates[d])}`;
-    const rota = [['Team member', 'Primary role'].concat(D.DAYS.map((_, d) => label(d)), ['Hours'])];
+    const shifts = D.shifts(wk), dates = D.weekDates(wk), label = d => `${D.DAYS[d]} ${D.nice(dates[d])}`, idx = Engine.breakIndex(shifts);
+    const rota = [['Team member', 'Primary role'].concat(D.DAYS.map((_, d) => label(d)), ['Hours worked'])];
     D.ROLES.forEach(r => D.state.staff.filter(p => p.primary === r.id).forEach(p => {
       rota.push([p.name, r.name].concat(D.DAYS.map((_, d) => {
         const mine = shifts.filter(s => s.staffId === p.id && s.day === d).sort((a, b) => a.start - b.start);
-        if (mine.length) return mine.map(shiftLabel).join('\n');
+        if (mine.length) return mine.map(s => shiftLabel(s, idx)).join('\n');
         return Engine.onHoliday(p, dates[d]) ? 'Holiday' : '';
       }), [String(D.hrs(Engine.minutes(shifts, p.id)))]));
     }));
-    const list = [['Date', 'Day', 'Team member', 'Area', 'Treatment', 'Start', 'End', 'Hours']].concat(shifts.slice().sort((a, b) => a.day - b.day || a.start - b.start).map(s =>
-      [dates[s.day], D.DAY_NAMES[s.day], (D.person(s.staffId) || { name: '?' }).name, D.role(s.role).name, s.treatment || '', D.hhmm(s.start), D.hhmm(s.end), String(D.hrs(s.end - s.start))]));
+    const list = [['Date', 'Day', 'Team member', 'Area', 'Treatment', 'Start', 'End', 'Break', 'Hours worked']].concat(shifts.slice().sort((a, b) => a.day - b.day || a.start - b.start).map(s => {
+      const b = Engine.breakIn(s, idx), worked = Engine.pieces(s, idx).reduce((t, x) => t + x.end - x.start, 0);
+      return [dates[s.day], D.DAY_NAMES[s.day], (D.person(s.staffId) || { name: '?' }).name, D.role(s.role).name, s.treatment || '', D.hhmm(s.start), D.hhmm(s.end), b ? `${D.hhmm(b.start)}–${D.hhmm(b.end)}` : '', String(D.hrs(worked))];
+    }));
     const gaps = [['Day', 'Area', 'Treatment', 'From', 'To', 'People short']].concat(Engine.gaps(wk).map(g => [label(g.day), D.role(g.role).name, g.treatment || '', D.hhmm(g.start), D.hhmm(g.end), String(g.short)]));
     return { week: wk, rota, shifts: list, gaps };
   }
@@ -329,12 +340,14 @@ const Sheets = (function () {
     const practitioners = [], notScheduled = [];
     D.state.staff.filter(p => p.skills.some(s => roles.includes(s))).forEach(p => {
       // bookable windows per week: this person's shifts in the chosen areas, with back-to-back shifts joined
+      // (breaks are left out, so no one can be booked over their lunch)
       const perWeek = weeks.map(w => {
-        const out = [];
-        (D.state.weeks[w] || []).filter(s => s.staffId === p.id && roles.includes(s.role)).sort((a, b) => a.day - b.day || a.start - b.start).forEach(s => {
-          const prev = out[out.length - 1];
-          if (prev && prev.day === s.day && s.start <= prev.end) prev.end = Math.max(prev.end, s.end); else out.push({ day: s.day, start: s.start, end: s.end });
-        });
+        const out = [], list = D.state.weeks[w] || [], idx = Engine.breakIndex(list);
+        [].concat(...list.filter(s => s.staffId === p.id && roles.includes(s.role)).map(s => Engine.pieces(s, idx).map(x => ({ day: s.day, start: x.start, end: x.end }))))
+          .sort((a, b) => a.day - b.day || a.start - b.start).forEach(s => {
+            const prev = out[out.length - 1];
+            if (prev && prev.day === s.day && s.start <= prev.end) prev.end = Math.max(prev.end, s.end); else out.push(s);
+          });
         return out;
       });
       if (!perWeek.some(w => w.length)) { notScheduled.push(p.name); return; }

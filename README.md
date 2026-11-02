@@ -4,32 +4,32 @@ A scheduling and capacity-planning tool for the front of house, café, therapist
 
 ## Run it
 
-Open `index.html` in a browser. Everything is saved in that browser on that computer; use **Google Sheets → Backup** to move it elsewhere.
+Open `index.html` in a browser. Everything is saved in that browser on that computer as you go.
+
+## Keeping the data safe
+
+- **Updates do not remove data.** The data lives in the browser, not in the app's files, so publishing a new version leaves it in place. Older data is upgraded automatically when a new version first opens.
+- **Automatic copies.** Before a new version upgrades the data, a copy is kept exactly as it was. Another copy is kept once a day while the app is in use. The last 20 copies are listed under the **Backup** button at the top and any of them can be restored; the current data is copied first, so a restore can be undone.
+- **Backup files.** The Backup button also downloads the whole lot as a file and restores from one. Those automatic copies are in the same browser, so a downloaded file kept somewhere like Google Drive is the only copy that survives clearing the browser or changing computer. The button turns red when there are changes and no backup file for over a week.
 
 It starts with a fictional sample team so you can see how it works. Replace it with **Google Sheets → Clear everything**, then add people on the Team tab or import them from a sheet.
 
 ## What it does
 
-- **Team** — each person's main area, the areas they are trained to work in, the treatments they can do (for therapists), contracted hours, working days and hours, holidays and notes. Working hours can be the same every week or a four-week rotation.
-- **Coverage needs** — how many people each area needs and when, per day. A therapist shift can ask for a specific treatment. The treatment list and the start of the four-week rotation are set here too.
-- **Rota** — a week view. Add or change shifts by clicking; shifts that break a rule (not trained, does not do the treatment, on holiday, outside working hours, overlapping, over contracted hours) are marked. A coverage strip shows where each area is short.
-- **Fill the gaps / Build best rota** — builds the rota automatically within the rules.
-- **Coverage gaps** — every uncovered stretch, with the people who could cover it, ranked. Options that would need an exception (a non-working day, outside usual hours, over contracted hours) are listed separately with the reason.
+- **Team** — each person's main area, the areas they are trained to work in, the treatments they can do (for therapists), contracted hours, working days and hours, holidays and notes. Working hours can be the same every week, or a 2-week or 4-week rotation. A day can have several blocks of time (a split shift), and each block can be for a different area, for example studio in the morning and front of house in the afternoon.
+- **Coverage needs** — how many people each area needs and when, per day. A therapist shift can ask for a specific treatment. The treatment list, the start of the rotation and the break rules are set here too.
+- **Rota** — a week view. **Add working hours to the rota** puts everyone's usual working days and hours for that week on it as shifts (one per block, in the block's area); **+ usual hours** does the same for one person, and the Team tab has the same button. Days that already have shifts, holidays and days off are left alone. Add or change shifts by clicking; shifts that break a rule (not trained, does not do the treatment, on holiday, outside working hours, overlapping, over contracted hours) are marked.
+- **Gaps in cover** — shown at the top of the rota for each area and day, with the exact times, and listed below the rota with the people who could cover each one. Options that would need an exception (a non-working day, outside usual hours, over contracted hours) are listed separately with the reason. Nothing is filled in automatically.
+- **Breaks** — each continuous shift gets a break by the rules on the Coverage needs tab, placed in the middle of the shift (it can be moved on the shift). Defaults: under 4 hours no break; 4 to 4.5 hours 15 minutes; over 4.5 and under 6 hours 30 minutes; exactly 6 hours 45 minutes; over 6 hours one hour. Someone on a break does not count towards cover, so an uncovered lunch shows as a gap, and hours worked exclude breaks.
 - **Capacity** — hours needed against hours the team can give, per area, per day, per treatment and per person, with plain-language findings (for example where an area depends on cross-trained cover, where the hours exist but at the wrong times, or where only one person does a treatment).
-
-## How the automatic rota works
-
-It fills treatment-specific cover first, then the hardest gaps (those with the fewest people able to cover them). For each gap it prefers someone who can cover the whole block, then people whose main area it is, then specialists over multi-skilled staff (so flexible people stay free for gaps only they can fill), then whoever has the most unused contracted hours. A second pass moves people between shifts where that closes a remaining gap.
-
-It never breaks a rule. It is a heuristic: it produces a good rota quickly, not a mathematically proven best one, so a gap it leaves can sometimes be closed by hand.
 
 ## Reading the team from a sheet
 
 Use **Google Sheets → Read from Google Sheet** with the sheet's link, or **Import a file** with an .xlsx or .csv. Two layouts are understood.
 
-**A tab per team.** Tabs named Therapists, FOH, BaristasAttendants, Instructors and Acupuncturists. Each person is a block: a row with their name and the days of the week, then a row per rotation week ("WEEK 1", "WEEK 2 & 4", "Weekly") with times written freely ("7:30AM - 3:30PM (8hrs)", "9-4:30pm"). The importer:
+**A tab per team.** Tabs named Therapists, FOH, BaristasAttendants, Instructors and Acupuncturists. Each person is a block: a row with their name and the days of the week, then a row per rotation week ("WEEK 1", "WEEK 2 & 4", "Weekly") with times written freely ("7:30AM - 3:30PM (8hrs)", "9-4:30pm"). Weeks labelled "1 & 3" and "2 & 4" become a 2-week rotation, and a cell with two time ranges becomes a split shift. The importer:
 
-- sets each person's area from the tab they are on, and treats a name that appears on two tabs as one person trained in both;
+- sets each person's area from the tab they are on, and treats a name that appears on two tabs as one person trained in both, keeping each tab's hours as separate blocks for that area;
 - gives people on the Acupuncturists tab the Acupuncture treatment;
 - reads weekly hours from a note such as "32 hours/week" where there is one, and otherwise takes them from the availability listed;
 - corrects times whose AM/PM cannot be right (for example "11:30PM - 07:30PM (8hrs)" is read as 11:30 to 19:30);
@@ -65,7 +65,7 @@ Trybe (try.be) has no spreadsheet import for rotas. In Trybe a practitioner's ro
 
 **Google Sheets → Export for Trybe** converts the four weeks starting at the week on screen into that shape:
 
-- one rota per practitioner, as a 1, 2 or 4-week cycle depending on how their four weeks repeat, in the request body that `POST /shop/practitioner-rotas` expects;
+- one rota per practitioner, as a 1, 2 or 4-week cycle depending on how their four weeks repeat, in the request body that `POST /shop/practitioner-rotas` expects, with breaks left out so no one is booked over lunch;
 - holidays as custom-availability blocks for `POST /shop/practitioners/{practitionerId}/custom-availability`;
 - only shifts in the chosen bookable areas (by default therapists and studio), so front-of-house or café time is not offered for bookings.
 
@@ -79,8 +79,8 @@ For the file export, two things have to be added from Trybe itself: each person'
 
 ## Files
 
-- `js/data.js` — data model, storage and the sample team
-- `js/engine.js` — rule checks, gap detection, suggestions, the auto-scheduler and capacity figures
+- `js/data.js` — data model, storage, automatic copies and the sample team
+- `js/engine.js` — breaks, rule checks, gap detection, suggestions, working hours to rota, and capacity figures
 - `js/sheets.js` — reading sheets and workbooks (including .xlsx), and exporting the rota
 - `js/trybe.js` — the direct connection to Trybe
 - `js/ui.js` — the interface
