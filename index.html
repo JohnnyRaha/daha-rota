@@ -12,19 +12,20 @@
     <img src="assets/logo.png" alt="Dāha Wellness">
     <div class="brand">Rota &amp; capacity</div>
     <nav id="tabs">
-      <button data-tab="rota">Rota</button>
-      <button data-tab="team">Team</button>
-      <button data-tab="needs">Coverage needs</button>
-      <button data-tab="capacity">Capacity</button>
-      <button data-tab="sheets">Google Sheets</button>
+      <button data-tab="rota" data-tip="The week's rota: everyone's shifts, the gaps in cover, and who could fill them">Rota</button>
+      <button data-tab="team" data-tip="Each person's areas, treatments, contracted hours, working days and hours, and holidays">Team</button>
+      <button data-tab="needs" data-tip="How many people each area needs and when, plus break rules, treatments and the rotation start">Coverage needs</button>
+      <button data-tab="capacity" data-tip="Hours needed against the hours the team can give, by area, day, treatment and person">Capacity</button>
+      <button data-tab="sheets" data-tip="Import the team from Google Sheets or Excel, export the rota, and send rotas to Trybe">Google Sheets</button>
+      <button data-tab="help" data-tip="Step-by-step instructions and answers to common questions">How to use</button>
     </nav>
     <div id="weeknav">
-      <button data-week="-1" title="Previous week">‹</button>
+      <button data-week="-1" data-tip="Previous week">‹</button>
       <span id="weeklabel"></span>
-      <button data-week="1" title="Next week">›</button>
-      <button data-week="0" class="quiet">This week</button>
+      <button data-week="1" data-tip="Next week">›</button>
+      <button data-week="0" class="quiet" data-tip="Go back to the current week">This week</button>
     </div>
-    <button id="backup-btn" type="button" title="Download or restore a backup">Backup</button>
+    <button id="backup-btn" type="button" data-tip="Download a backup file, restore one, or go back to a copy the app kept automatically">Backup</button>
   </header>
 
   <main id="view"></main>

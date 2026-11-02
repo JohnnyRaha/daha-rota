@@ -16,6 +16,8 @@ It starts with a fictional sample team so you can see how it works. Replace it w
 
 ## What it does
 
+- **How to use** — a tab with step-by-step instructions for getting started, a key to the rota, answers to common questions, the break rules in force and how the data is kept. It opens the first time the app is used in a browser. Every button and box also has a short tooltip, shown on hover or keyboard focus.
+
 - **Team** — each person's main area, the areas they are trained to work in, the treatments they can do (for therapists), contracted hours, working days and hours, holidays and notes. Working hours can be the same every week, or a 2-week or 4-week rotation. A day can have several blocks of time (a split shift), and each block can be for a different area, for example studio in the morning and front of house in the afternoon.
 - **Coverage needs** — how many people each area needs and when, per day. A therapist shift can ask for a specific treatment. The treatment list, the start of the rotation and the break rules are set here too.
 - **Rota** — a week view. **Add working hours to the rota** puts everyone's usual working days and hours for that week on it as shifts (one per block, in the block's area); **+ usual hours** does the same for one person, and the Team tab has the same button. Days that already have shifts, holidays and days off are left alone. Add or change shifts by clicking; shifts that break a rule (not trained, does not do the treatment, on holiday, outside working hours, overlapping, over contracted hours) are marked.

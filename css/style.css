@@ -253,3 +253,34 @@ td.tblocks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 dialog form.wide { min-width: min(560px, 90vw); }
 dialog:has(form.wide) { width: min(620px, 94vw); }
 .snaps td { white-space: normal; font-size: 13px; padding: 5px 8px; }
+
+/* ---------- tooltips ---------- */
+#tip { position: fixed; z-index: 100; max-width: 320px; padding: 7px 10px; border-radius: 6px; background: var(--deep); color: #fff;
+  font-size: 12.5px; line-height: 1.4; white-space: pre-line; pointer-events: none; box-shadow: 0 6px 18px rgba(0, 0, 0, .22); }
+
+/* ---------- how to use ---------- */
+.help { max-width: 900px; }
+.help .card h2 { margin-top: 0; }
+.help ol.steps { padding-left: 22px; }
+.help ol.steps li { margin-bottom: 10px; }
+.help ol.steps button { margin-left: 4px; }
+.legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.legend > div { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); }
+.legend p { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+.legend .shift { cursor: default; }
+.legend .lg { display: block; height: 30px; border: 1px solid var(--mist); border-radius: 4px; font-size: 11px; text-align: center; line-height: 30px; }
+.legend .lg.off { background: repeating-linear-gradient(135deg, #fafafa, #fafafa 6px, #f1f2f2 6px, #f1f2f2 12px); }
+.legend .lg.hol { background: #fbf3e4; color: #a0732b; font-weight: 600; }
+.legend .lg.avail { color: #a9b5b3; }
+.faq details { margin-bottom: 6px; padding: 9px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--white); }
+.faq summary { cursor: pointer; font-weight: 600; color: var(--deep); }
+.faq details div { margin-top: 6px; }
+ul.cols3 { columns: 3 180px; }
+
+/* header on narrower screens: tabs move to their own row instead of wrapping their labels */
+#tabs button { white-space: nowrap; }
+#weeknav { white-space: nowrap; }
+@media (max-width: 1150px) {
+  #top { flex-wrap: wrap; row-gap: 2px; }
+  #tabs { order: 3; width: 100%; margin-left: 0; overflow-x: auto; }
+}

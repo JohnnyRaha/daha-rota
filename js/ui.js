@@ -5,6 +5,7 @@
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const h = m => { const v = D.hrs(m); return (Number.isInteger(v) ? v : v.toFixed(1)) + ' h'; };
   const span = (a, b) => `${D.hhmm(a)}–${D.hhmm(b)}`;
+  const hm = m => `${Math.floor(m / 60)} h${m % 60 ? ' ' + (m % 60) + ' min' : ''}`;
   const first = p => p.name.split(' ')[0];
   const deep = x => JSON.parse(JSON.stringify(x));
   const trybeRoles = () => (D.state.settings.trybeRoles || 'therapy,studio').split(',');
@@ -24,11 +25,173 @@
   const roleTag = id => `<span class="tag" style="--c:${D.role(id).color}">${esc(D.role(id).short)}</span>`;
   const roleOptions = (cur, p) => D.ROLES.map(r => `<option value="${r.id}"${r.id === cur ? ' selected' : ''}>${esc(r.name)}${p && !p.skills.includes(r.id) ? ' (not trained)' : ''}</option>`).join('');
 
+
+  // ---------- tooltips ----------
+  // One place for the hover and keyboard-focus help on every control. A tip is only added where the element
+  // does not already carry its own (some are built with the content, such as the reasons a shift is marked).
+  const TIPS = [
+    // rota
+    ['[data-act=hours]', 'Puts each person\'s usual working days and hours for this week on the rota as shifts, with breaks. Days that already have shifts, holidays and days off are left alone, so it is safe to press again.'],
+    ['[data-act=copyweek]', 'Replaces this week with a copy of last week\'s shifts. Check the ⚠ marks afterwards for holidays and changed hours.'],
+    ['[data-act=clear]', 'Removes every shift in this week. The team and their working hours are not changed.'],
+    ['[data-act=print]', 'Prints the rota grid for this week.'],
+    ['.bar .stats', 'Cover needed comes from the Coverage needs tab. Worked is the hours on the rota after breaks. Uncovered is time when an area has fewer people than it needs.'],
+    ['.rota [data-act=hoursone]', 'Adds this person\'s usual hours for this week only. Days that already have shifts are left alone.'],
+    ['[data-act=person]', 'Open this person on the Team tab.'],
+    ['.rota .avail', 'This person\'s usual working hours for the day. Click the cell to add a shift.'],
+    ['.rota .state', 'Not a working day this week, or on holiday. You can still click to add a shift; it will be marked ⚠.'],
+    ['.rota .pill.ok', 'Enough people for the whole of this day.'],
+    ['.rota tr.cover th.who', 'Red times are gaps in cover: when this area has fewer people working than it needs, including during breaks.'],
+    ['.rota td.hrs', 'Hours worked this week after breaks, against contracted hours.'],
+    ['.opts:not(.exc) [data-act=assign]', 'Adds this shift to the rota. It breaks no rules. You can change it afterwards by clicking it.'],
+    ['.opts.exc [data-act=assign]', 'Adds this shift even though it breaks the rule shown. Check with the person first.'],
+    // team
+    ['[data-act=newperson]', 'Add someone new, then fill in their details on the right.'],
+    ['.list button.row', 'Show and edit this person\'s details.'],
+    ['[data-f=name]', 'Their name as it should appear on the rota. Imports match people by name.'],
+    ['[data-f=hours]', 'Hours a week they are contracted for, after breaks. A shift that takes the week over this is marked ⚠.'],
+    ['[data-f=primary]', 'The area they normally work in. Their working hours go here unless a block of time says otherwise.'],
+    ['label:has(input[data-skill])', 'Areas this person can cover. Gaps only suggest people trained for the area.'],
+    ['label:has(input[data-treat])', 'Treatments this therapist can do. Used when cover asks for a specific treatment.'],
+    ['[data-act=pattern][data-n="1"]', 'The same days and hours every week.'],
+    ['[data-act=pattern][data-n="2"]', 'Two different weeks that alternate. Which week counts as week 1 is set on the Coverage needs tab.'],
+    ['[data-act=pattern][data-n="4"]', 'Four different weeks in turn. Which week counts as week 1 is set on the Coverage needs tab.'],
+    ['[data-act=rot]', 'Show and edit this week of the rotation. The dot marks the rotation week shown on the rota.'],
+    ['[data-act=copyrot]', 'Copy the week shown to every week of the rotation.'],
+    ['label:has(input[data-k=on])', 'Tick the days they work.'],
+    ['.days input[data-k=start]', 'When this block of work starts.'],
+    ['.days input[data-k=end]', 'When this block of work ends.'],
+    ['.days select[data-k=role]', 'The area for this block of time. “Main area” means their main area.'],
+    ['[data-act=addb]', 'Add another block of time on this day: a split shift, or time in a different area.'],
+    ['[data-act=delb]', 'Remove this block of time.'],
+    ['.editor [data-act=hoursone]', 'Adds these working hours to the rota for the week shown at the top. Days that already have shifts are left alone.'],
+    ['[data-f=note]', 'Anything to remember when scheduling. Not used in any calculation.'],
+    ['[data-act=addhol]', 'Book holiday or time off. They are not put on the rota or suggested for gaps on those days.'],
+    ['[data-hol][data-k=from]', 'First day off.'],
+    ['[data-hol][data-k=to]', 'Last day off.'],
+    ['[data-act=delhol]', 'Remove this time off.'],
+    ['[data-act=delperson]', 'Remove this person and all of their shifts.'],
+    // coverage needs
+    ['[data-set=maxDay]', 'No one should work more than this many hours in a day, after breaks. Longer days are marked ⚠.'],
+    ['[data-set=rotationStart]', 'Pick any day in the week that counts as week 1. Two- and four-week rotations count on from here.'],
+    ['[data-act=resetneeds]', 'Put the cover needed in every area back to the defaults.'],
+    ['[data-br$="|inclusive"]', '“Of at least” includes the length itself; “longer than” does not.'],
+    ['[data-br$="|hours"]', 'Shift length in hours, for example 4.5.'],
+    ['[data-br$="|minutes"]', 'Break length in minutes.'],
+    ['[data-act=delbreak]', 'Remove this rule.'],
+    ['[data-act=addbreak]', 'Add another rule. A shift gets the longest break of all the rules it meets.'],
+    ['[data-act=resetbreaks]', 'Use the standard rules: 15 minutes from 4 hours, 30 over 4.5 hours, 45 at 6 hours, and an hour over 6 hours.'],
+    ['[data-treatlist]', 'The treatments to choose from, separated by commas.'],
+    ['[data-act=copymon]', 'Make Tuesday to Friday the same as Monday for this area.'],
+    ['[data-need$="|start"]', 'When this cover starts.'],
+    ['[data-need$="|end"]', 'When this cover ends.'],
+    ['[data-need$="|count"]', 'How many people are needed at the same time.'],
+    ['[data-need$="|treatment"]', '“Any” for general cover, or a treatment someone must be able to do at that time.'],
+    ['[data-act=delblock]', 'Remove this cover.'],
+    ['[data-act=addblock]', 'Add another period of cover on this day.'],
+    // capacity
+    ['.tiles div:nth-child(1)', 'Hours of cover needed this week, from the Coverage needs tab (people × hours).'],
+    ['.tiles div:nth-child(2)', 'Working hours the team has this week after breaks and holidays, capped at each person\'s contracted hours.'],
+    ['.tiles div:nth-child(3)', 'Hours worked on this week\'s rota, after breaks.'],
+    ['.tiles div:nth-child(4)', 'Hours when an area has fewer people working than it needs.'],
+    // Google Sheets and Trybe
+    ['[data-set=sheetUrl]', 'The address of the Google Sheet, copied from the browser while it is open.'],
+    ['[data-act=import]', 'Reads the team from the link above. The sheet must be shared as “Anyone with the link can view”.'],
+    ['[data-act=importcsv]', 'Choose an Excel (.xlsx) or CSV file. It is read in this browser and not uploaded.'],
+    ['[data-act=template]', 'Download an example of the simple one-row-per-person layout.'],
+    ['[data-act=copy]', 'Copies this week\'s rota so you can paste it into any Google Sheet.'],
+    ['[data-act=csv]', 'Download this week\'s rota as a spreadsheet file.'],
+    ['[data-act=csvshifts]', 'Download one row per shift, with breaks and hours worked.'],
+    ['[data-set=scriptUrl]', 'The web app URL from Apps Script, ending in /exec. See the steps above.'],
+    ['[data-set=scriptKey]', 'Optional password. It must match KEY in the script.'],
+    ['[data-act=send]', 'Writes Rota, Shifts and Gaps tabs for this week into your Google Sheet. Needs the one-off set-up.'],
+    ['[data-act=copyscript]', 'Copy the Apps Script to paste into your Google Sheet.'],
+    ['[data-set=trybeRoles]', 'Which areas count as bookable practitioners in Trybe. Shifts in other areas are left out.'],
+    ['[data-act=hoursfour]', 'Adds working hours to the rota for this week and the next three, ready for a Trybe export.'],
+    ['[data-act=trybejson]', 'Download the four weeks as Trybe rotas, in the format Trybe\'s API accepts.'],
+    ['[data-act=trybecsv]', 'Download the same rotas as a list, for entering in Trybe by hand.'],
+    ['[data-act=trybecheck]', 'Look up your practitioners in Trybe and compare their current rotas. Asks for the API token the first time. Nothing is sent yet.'],
+    ['[data-act=trybedemo]', 'Try the whole Trybe flow against a pretend Trybe built from your team. Nothing is sent anywhere.'],
+    ['[data-act=trybesend]', 'Sends the rotas marked above to Trybe. You are asked to confirm first.'],
+    ['[data-act=trybeforget]', 'Disconnect from Trybe and remove the token from this browser.'],
+    ['[data-tp$="|id"]', 'The matching practitioner in Trybe. Pick another if the match is wrong.'],
+    ['[data-tp$="|action"]', 'What to do in Trybe for this person.'],
+    ['[data-act=openbackup]', 'Download a backup file, restore one, or go back to a copy the app kept automatically.'],
+    ['[data-act=sample]', 'Replace everything with the made-up sample team. The current data is kept as a copy under Backup.'],
+    ['[data-act=wipe]', 'Delete the team, every rota and the settings from this browser. A copy is kept under Backup.'],
+    // dialogs
+    ['[name=staffId]', 'Who works the shift.'],
+    ['[name=role]', 'The area this shift covers. “(not trained)” means the person is not marked as trained for it.'],
+    ['[name=treatment]', 'Leave as “Any” for general cover, or pick the treatment this shift is for.'],
+    ['[name=breakStart]', 'When the break starts. It is placed in the middle of the shift unless you change it.'],
+    ['[data-do=middle]', 'Put the break back in the middle of the shift.'],
+    ['[data-do=delete]', 'Remove this shift from the rota.'],
+    ['[data-do=save]', 'Save the shift. A shift that breaks a rule can still be saved; it is marked ⚠ on the rota.'],
+    ['[data-do=download]', 'Download everything (team, rotas and settings) as one file. Keep it somewhere safe such as Google Drive.'],
+    ['[data-do=file]', 'Replace what is in the app with a backup file. The current data is kept as a copy first.'],
+    ['[data-do=snap]', 'Go back to this copy. The current data is kept as a copy first, so this can be undone.'],
+    ['[name=token]', 'The API token Trybe\'s tech support sent you.'],
+    ['[name=env]', 'Playground is Trybe\'s test environment. Live changes real availability for bookings.'],
+    ['[name=keep]', 'Keep the token on this computer. Leave unticked on a shared computer.'],
+    // how to use
+    ['[data-act=goto]', 'Go to that tab.']
+  ];
+  function applyTips(root) {
+    TIPS.forEach(([sel, text]) => root.querySelectorAll(sel).forEach(el => { if (!el.dataset.tip) el.dataset.tip = text; }));
+    root.querySelectorAll('.plain thead th').forEach(th => { const t = HEAD_TIPS[th.textContent.trim()]; if (t && !th.dataset.tip) th.dataset.tip = t; });
+  }
+  const HEAD_TIPS = {
+    'Needed': 'Hours of cover this area needs this week.',
+    'Own team can give': 'Available hours, after breaks, of people whose main area this is.',
+    'Cross-trained cover': 'Available hours of people from other areas who are trained for this one. They can only be used once across areas.',
+    'Worked': 'Hours worked in this area on the rota, after breaks.',
+    'Uncovered': 'Hours when fewer people are working than needed.',
+    'Covered': 'Share of the needed hours that are covered.',
+    'Available this week': 'Working hours this week after breaks and holidays, capped at contracted hours.',
+    'Worked on the rota': 'Hours on this week\'s rota after breaks.',
+    'Use of available hours': 'Hours worked as a share of the hours available.',
+    'Their available hours': 'Available hours this week of everyone who does this treatment.',
+    'Specific cover needed': 'Hours of cover that ask for this treatment on the Coverage needs tab.'
+  };
+  // A single floating tip, shown on hover (after a short pause) or keyboard focus.
+  const tipBox = document.createElement('div');
+  let tipFor = null, tipTimer = null;
+  function showTip(el) {
+    clearTimeout(tipTimer);
+    if (!el.isConnected || !el.dataset.tip) return;
+    tipFor = el;
+    (el.closest('dialog') || document.body).append(tipBox);   // inside an open dialog so it shows above it
+    tipBox.textContent = el.dataset.tip; tipBox.hidden = false;
+    const r = el.getBoundingClientRect(), w = tipBox.offsetWidth, ht = tipBox.offsetHeight;
+    let y = r.bottom + 8;
+    if (y + ht > innerHeight - 8) y = r.top - ht - 8;
+    tipBox.style.left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 8)) + 'px';
+    tipBox.style.top = Math.max(8, y) + 'px';
+  }
+  function hideTip() { clearTimeout(tipTimer); tipFor = null; tipBox.hidden = true; }
+  function initTips() {
+    tipBox.id = 'tip'; tipBox.setAttribute('role', 'tooltip'); tipBox.hidden = true;
+    document.body.append(tipBox);
+    applyTips(document);
+    document.addEventListener('mouseover', e => {
+      const el = e.target.closest && e.target.closest('[data-tip]');
+      if (el === tipFor) return;
+      if (!el) return hideTip();
+      clearTimeout(tipTimer); tipBox.hidden = true; tipFor = el;
+      tipTimer = setTimeout(() => showTip(el), 350);
+    });
+    document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest('[data-tip]'); if (el && e.target.matches(':focus-visible')) showTip(el); else hideTip(); });
+    document.addEventListener('focusout', hideTip);
+    document.addEventListener('mousedown', hideTip);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') hideTip(); });
+    document.addEventListener('scroll', hideTip, true);
+  }
+
   // ---------- rota ----------
   function rotaView() {
     const shifts = D.shifts(wk), dates = D.weekDates(wk), gaps = E.gaps(wk), cap = E.capacity(wk), todayIso = D.today(), idx = E.breakIndex(shifts);
     let html = `<div class="bar">
-        <button class="primary" data-act="hours" title="Adds each person's usual working days and hours for this week as shifts">Add working hours to the rota</button>
+        <button class="primary" data-act="hours">Add working hours to the rota</button>
         <button data-act="copyweek">Copy last week</button><button data-act="clear">Clear week</button><button data-act="print">Print</button>
         <span class="stats"><b>${h(cap.required)}</b> cover needed · <b>${h(cap.scheduled)}</b> worked · <b class="${cap.unfilled ? 'warn' : 'ok'}">${cap.unfilled ? h(cap.unfilled) + ' uncovered' : 'fully covered'}</b></span>
       </div>`;
@@ -41,7 +204,7 @@
         if (!d.need) return '<td class="none">–</td>';
         if (!d.gaps.length) return '<td><span class="pill ok">Covered</span></td>';
         const shown = d.gaps.slice(0, 3);
-        return '<td class="gapcell">' + shown.map(g => `<button class="pill short" data-act="jump" data-gap="${gaps.indexOf(g)}" title="${g.short} ${g.short === 1 ? 'person' : 'people'} short${g.treatment ? ' (' + esc(g.treatment) + ')' : ''}">${span(g.start, g.end)}${g.short > 1 ? ' ×' + g.short : ''}</button>`).join('')
+        return '<td class="gapcell">' + shown.map(g => `<button class="pill short" data-act="jump" data-gap="${gaps.indexOf(g)}" data-tip="${D.role(g.role).name}${g.treatment ? ' (' + esc(g.treatment) + ')' : ''} is ${g.short} ${g.short === 1 ? 'person' : 'people'} short from ${span(g.start, g.end)}. Click to see who could cover it.">${span(g.start, g.end)}${g.short > 1 ? ' ×' + g.short : ''}</button>`).join('')
           + (d.gaps.length > 3 ? `<small>+${d.gaps.length - 3} more</small>` : '') + '</td>';
       }).join('') + `<td class="hrs">${h(r.scheduled)} / ${h(r.required)}</td></tr>`;
     });
@@ -53,14 +216,14 @@
       people.forEach(p => {
         const mins = E.minutes(shifts, p.id), over = mins > p.hours * 60;
         html += `<tr><th class="who"><button class="link" data-act="person" data-id="${p.id}">${esc(p.name)}</button><small>${p.skills.map(s => D.role(s).short).join(' · ')}${p.treatments.length ? ' · ' + p.treatments.length + ' treatment' + (p.treatments.length > 1 ? 's' : '') : ''}</small>
-          <button class="quiet mini" data-act="hoursone" data-id="${p.id}" title="Add ${esc(first(p))}'s usual hours for this week">+ usual hours</button></th>`;
+          <button class="quiet mini" data-act="hoursone" data-id="${p.id}">+ usual hours</button></th>`;
         dates.forEach((date, day) => {
           const mine = shifts.filter(s => s.staffId === p.id && s.day === day).sort((a, b) => a.start - b.start), hol = E.onHoliday(p, date), blocks = D.blocksOf(D.daysOf(p, wk)[day]);
           html += `<td class="cell${hol ? ' hol' : !blocks.length ? ' off' : ''}" data-act="add" data-id="${p.id}" data-day="${day}">`
             + (hol ? '<span class="state">Holiday</span>' : !blocks.length && !mine.length ? '<span class="state">Off</span>' : !mine.length ? `<span class="avail">${E.spans(blocks)}</span>` : '')
             + mine.map(s => {
               const issues = E.check(wk, s), b = E.breakIn(s, idx);
-              return `<button class="shift${issues.length ? ' flag' : ''}" style="--c:${D.role(s.role).color}" data-act="edit" data-shift="${s.id}" title="${esc(issues.join('\n') || 'Click to edit')}">${span(s.start, s.end)}<small>${esc(s.treatment || D.role(s.role).short)}${issues.length ? ' ⚠' : ''}</small>${b ? `<small class="brk">Break ${span(b.start, b.end)}</small>` : ''}</button>`;
+              return `<button class="shift${issues.length ? ' flag' : ''}" style="--c:${D.role(s.role).color}" data-act="edit" data-shift="${s.id}" data-tip="${esc(issues.length ? 'Breaks a rule:\n' + issues.join('\n') + '\nClick to change it.' : 'Click to change or delete this shift.' + (b ? ' The break is worked out from the break rules; it can be moved on the shift.' : ''))}">${span(s.start, s.end)}<small>${esc(s.treatment || D.role(s.role).short)}${issues.length ? ' ⚠' : ''}</small>${b ? `<small class="brk">Break ${span(b.start, b.end)}</small>` : ''}</button>`;
             }).join('')
             + '</td>';
         });
@@ -98,6 +261,7 @@
           : `<small>No break needed for ${h(Math.max(0, shift.end - shift.start))} of work.</small>`}</div>
         ${issues.length ? `<ul class="issues">${issues.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="fine">No conflicts.</p>'}
         <div class="actions">${isNew ? '' : '<button type="button" class="danger" data-do="delete">Delete</button>'}<span></span><button type="button" data-do="cancel">Cancel</button><button type="button" class="primary" data-do="save">${issues.length && shift.end > shift.start ? 'Save anyway' : 'Save'}</button></div></form>`;
+      applyTips(dlg);
     };
     dlg.onchange = e => {
       const n = e.target.name;
@@ -150,16 +314,16 @@
       <table class="days"><tbody>`
       + pat.map((d, i) => `<tr class="${d.on ? '' : 'offrow'}"><td><label class="chk"><input type="checkbox" data-day="${i}" data-k="on"${d.on ? ' checked' : ''}> ${D.DAY_NAMES[i]}</label></td><td class="tblocks">`
         + d.blocks.map((b, j) => `<span class="tblock"><input type="time" step="900" data-day="${i}" data-b="${j}" data-k="start" value="${D.hhmm(b.start)}"${d.on ? '' : ' disabled'}>–<input type="time" step="900" data-day="${i}" data-b="${j}" data-k="end" value="${D.hhmm(b.end)}"${d.on ? '' : ' disabled'}>`
-          + (multi ? `<select data-day="${i}" data-b="${j}" data-k="role"${d.on ? '' : ' disabled'} title="Area for this block"><option value="">Main area</option>${p.skills.map(s => `<option value="${s}"${b.role === s ? ' selected' : ''}>${esc(D.role(s).name)}</option>`).join('')}</select>` : '')
-          + (d.blocks.length > 1 ? `<button class="x" data-act="delb" data-day="${i}" data-b="${j}" title="Remove this block">×</button>` : '') + '</span>').join('')
-        + (d.on ? `<button class="quiet" data-act="addb" data-day="${i}" title="Add another block of time on this day">+ split shift</button>` : '')
+          + (multi ? `<select data-day="${i}" data-b="${j}" data-k="role"${d.on ? '' : ' disabled'}><option value="">Main area</option>${p.skills.map(s => `<option value="${s}"${b.role === s ? ' selected' : ''}>${esc(D.role(s).name)}</option>`).join('')}</select>` : '')
+          + (d.blocks.length > 1 ? `<button class="x" data-act="delb" data-day="${i}" data-b="${j}">×</button>` : '') + '</span>').join('')
+        + (d.on ? `<button class="quiet" data-act="addb" data-day="${i}">+ split shift</button>` : '')
         + `</td><td class="muted">${dayInfo(d)}</td></tr>`).join('')
       + `</tbody></table><p class="hint">${n > 1 ? `Rotation week ${rot % n + 1}: ` : ''}${h(pat.reduce((s, d) => s + E.netOf(D.blocksOf(d)), 0))} of work a week after breaks. ${n > 1 ? `The week shown on the rota is rotation week ${current + 1} (•). ` : ''}Use “+ split shift” for a day worked in two or more parts${multi ? ', and pick an area for a block when it is not the main area' : ''}.</p>
       <div class="btns"><button data-act="hoursone" data-id="${p.id}">Add ${esc(first(p))}'s hours to the rota for the week of ${D.nice(wk)}</button></div>
       <label>Notes<textarea data-f="note" rows="2" placeholder="Anything to remember when scheduling">${esc(p.note)}</textarea></label>
       <h3>Holidays and time off</h3>`
       + (p.holidays.length ? '<table class="hols"><tbody>' + p.holidays.map((x, i) => `<tr><td><input type="date" data-hol="${i}" data-k="from" value="${x.from}"></td><td>to</td><td><input type="date" data-hol="${i}" data-k="to" value="${x.to}"></td>
-        <td><input placeholder="Note" data-hol="${i}" data-k="note" value="${esc(x.note || '')}"></td><td><button class="x" data-act="delhol" data-i="${i}" title="Remove">×</button></td></tr>`).join('') + '</tbody></table>' : '<p class="muted">None booked.</p>')
+        <td><input placeholder="Note" data-hol="${i}" data-k="note" value="${esc(x.note || '')}"></td><td><button class="x" data-act="delhol" data-i="${i}" data-tip="Remove">×</button></td></tr>`).join('') + '</tbody></table>' : '<p class="muted">None booked.</p>')
       + `<button data-act="addhol">+ Add time off</button><div class="foot"><button class="danger" data-act="delperson">Remove ${esc(first(p))} from the team</button></div></section></div>`;
     return html;
   }
@@ -173,9 +337,9 @@
       <div class="card"><h3>Breaks</h3><p class="hint" style="margin-top:0">Each continuous shift gets the longest break whose rule it meets, placed in the middle of the shift (it can be moved on the shift). Back-to-back shifts count as one. People on a break do not count towards cover, and hours worked exclude breaks.</p>
         <table class="brules"><tbody>` + rules.map((r, i) => `<tr><td>Shifts</td><td><select data-br="${i}|inclusive"><option value="1"${r.inclusive ? ' selected' : ''}>of at least</option><option value="0"${r.inclusive ? '' : ' selected'}>longer than</option></select></td>
           <td><input type="number" min="0" max="24" step="0.25" data-br="${i}|hours" value="${r.min / 60}"> hours</td><td>get a</td><td><input type="number" min="0" max="180" step="5" data-br="${i}|minutes" value="${r.minutes}"> minute break</td>
-          <td><button class="x" data-act="delbreak" data-i="${i}" title="Remove this rule">×</button></td></tr>`).join('') + `</tbody></table>
+          <td><button class="x" data-act="delbreak" data-i="${i}">×</button></td></tr>`).join('') + `</tbody></table>
         <div class="btns"><button class="quiet" data-act="addbreak">+ Add a rule</button><button class="quiet" data-act="resetbreaks">Use the standard rules</button></div>
-        <p class="muted">With these rules: ${examples.map(m => `${Math.floor(m / 60)}${m % 60 ? ':' + String(m % 60).padStart(2, '0') : ''} h → ${E.breakLength(m) ? E.breakLength(m) + ' min' : 'no break'}`).join(' · ')}</p></div>
+        <p class="muted">With these rules: ${examples.map(m => `${hm(m)} → ${E.breakLength(m) ? E.breakLength(m) + ' min' : 'no break'}`).join(' · ')}</p></div>
       <div class="card"><label>Treatment types (separate with commas)<input data-treatlist value="${esc(D.state.treatments.join(', '))}"></label>
         <p class="hint">Tick the treatments each therapist can do on the Team tab. On a Therapists shift below, leave the treatment as “Any” for general cover, or pick one when you need someone who can do that treatment at that time. Treatment-specific cover is counted separately from general cover.</p></div><div class="needs">`;
     D.ROLES.forEach(r => {
@@ -184,8 +348,8 @@
         const blocks = D.state.needs[r.id][day];
         html += `<tr><th>${D.DAY_NAMES[day]}</th><td>` + (blocks.length ? '' : '<span class="muted">No cover needed</span>') + blocks.map((b, i) =>
           `<span class="block"><input type="time" step="900" data-need="${r.id}|${day}|${i}|start" value="${D.hhmm(b.start)}">–<input type="time" step="900" data-need="${r.id}|${day}|${i}|end" value="${D.hhmm(b.end)}">
-           <input type="number" min="1" max="20" data-need="${r.id}|${day}|${i}|count" value="${b.count}" title="People needed"> <small>${b.count === 1 ? 'person' : 'people'}</small>
-           ${r.id === 'therapy' ? `<select data-need="${r.id}|${day}|${i}|treatment" title="Treatment needed"><option value="">Any</option>${D.state.treatments.map(x => `<option${x === b.treatment ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}<button class="x" data-act="delblock" data-role="${r.id}" data-day="${day}" data-i="${i}" title="Remove">×</button></span>`).join('')
+           <input type="number" min="1" max="20" data-need="${r.id}|${day}|${i}|count" value="${b.count}"> <small>${b.count === 1 ? 'person' : 'people'}</small>
+           ${r.id === 'therapy' ? `<select data-need="${r.id}|${day}|${i}|treatment"><option value="">Any</option>${D.state.treatments.map(x => `<option${x === b.treatment ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>` : ''}<button class="x" data-act="delblock" data-role="${r.id}" data-day="${day}" data-i="${i}" data-tip="Remove">×</button></span>`).join('')
           + `<button class="quiet" data-act="addblock" data-role="${r.id}" data-day="${day}">+ shift</button></td></tr>`;
       });
       html += '</tbody></table></section>';
@@ -308,6 +472,7 @@
       <p class="hint">Leave this unticked on a shared computer: the token is then forgotten when the tab is closed.</p>
       <ul class="issues" hidden></ul>
       <div class="actions"><span></span><button type="button" data-do="cancel">Cancel</button><button type="button" class="primary" data-do="connect">Connect</button></div></form>`;
+    applyTips(dlg);
     dlg.onclick = async e => {
       const act = e.target.dataset.do, f = dlg.querySelector('form'), err = dlg.querySelector('.issues');
       if (act === 'cancel') return dlg.close();
@@ -351,6 +516,7 @@
           : '<table class="plain snaps"><tbody>' + list.map(s => `<tr><td>${when(s.at)}</td><td>${esc(s.reason)}</td><td>${s.people} people</td><td><button type="button" class="quiet" data-do="snap" data-at="${s.at}">Restore</button></td></tr>`).join('') + '</tbody></table>'}
         <p class="hint">Restoring replaces what is in the app now; a copy of the current data is kept first, so it can be undone from this list.</p>
         <div class="actions"><span></span><button type="button" data-do="close">Close</button></div></form>`;
+      applyTips(dlg);
     };
     dlg.onclick = async e => {
       const act = e.target.dataset.do;
@@ -370,15 +536,77 @@
     draw(await D.Snapshots.all());
   }
 
+
+  // ---------- how to use ----------
+  function helpView() {
+    const go = (t, label) => `<button class="quiet" data-act="goto" data-tab="${t}">${label} →</button>`;
+    const ex = [180, 240, 270, 285, 360, 375, 480].map(m => `<li>${hm(m)}: ${E.breakLength(m) ? E.breakLength(m) + ' minute break' : 'no break'}</li>`).join('');
+    const q = (title, body) => `<details><summary>${title}</summary><div>${body}</div></details>`;
+    return `<div class="help">
+      <section class="card"><h2>How to use the rota and capacity tool</h2>
+        <p>Plan who works when across front of house, the café, therapists and the studio; see straight away where cover is missing; and share the rota with the team or with Trybe. Hover over any button or box for a short explanation of what it does.</p>
+        <p class="muted">Everything you enter stays in this browser on this computer. Nothing is sent anywhere unless you export it.</p></section>
+
+      <h2>Getting started</h2>
+      <ol class="steps">
+        <li><b>Bring in your team.</b> In Google Sheets, open the Available Working Hours sheet and choose <i>File → Download → Microsoft Excel</i>. Then on the Google Sheets tab press <i>Import a file</i> and pick that file. The sheet stays private, and the import lists anything it could not read so you can check those people. You can also add people one at a time on the Team tab. ${go('sheets', 'Google Sheets tab')}</li>
+        <li><b>Check each person.</b> On the Team tab, check their main area, the other areas they are trained for, the treatments they do, their contracted hours, their working days and hours, and any holidays. ${go('team', 'Team tab')}</li>
+        <li><b>Set the cover you need.</b> On the Coverage needs tab, set how many people each area needs and when, the break rules, and which week is week 1 of the rotation. ${go('needs', 'Coverage needs tab')}</li>
+        <li><b>Put the week on the rota.</b> On the Rota tab, choose the week with the arrows at the top of the page and press <i>Add working hours to the rota</i>. Everyone's usual hours for that week appear as shifts, with their breaks. ${go('rota', 'Rota tab')}</li>
+        <li><b>Close the gaps.</b> Red times at the top of the rota are gaps: times when an area has fewer people than it needs, including while someone is on a break. Below the rota each gap lists who could cover it. Click a name to add that shift, or click any cell to add a shift yourself.</li>
+        <li><b>Share it.</b> On the Google Sheets tab, copy the rota into a Google Sheet or download it. Practitioners' rotas can also go to Trybe from there.</li>
+        <li><b>Back up.</b> Press <i>Backup</i> at the top of the page now and then, download a backup file and keep it somewhere safe such as Google Drive.</li>
+      </ol>
+
+      <h2>Reading the rota</h2>
+      <div class="legend">
+        <div><span class="shift" style="--c:#304441">08:00–15:00<small>FOH</small><small class="brk">Break 11:00–12:00</small></span><p>A shift, coloured by area, with its break.</p></div>
+        <div><span class="shift flag" style="--c:#5f8a84">09:00–17:00<small>Therapy ⚠</small></span><p>A shift that breaks a rule, such as a holiday or too many hours. Hover to see why.</p></div>
+        <div><span class="pill short">11:00–12:00</span><p>A gap in cover. Click it to see who could fill it.</p></div>
+        <div><span class="pill ok">Covered</span><p>Enough people all day in that area.</p></div>
+        <div><span class="lg off"></span><p>Not a working day for that person this week.</p></div>
+        <div><span class="lg hol">Holiday</span><p>Booked time off.</p></div>
+        <div><span class="lg avail">09:00–17:00</span><p>Their usual hours, not yet on the rota.</p></div>
+      </div>
+
+      <h2>How do I…</h2>
+      <div class="faq">
+        ${q('Add or change a single shift', 'On the Rota tab, click the empty part of a cell to add a shift for that person and day, or click a shift to change its times, area or treatment, move its break, or delete it. Shifts that break a rule can still be saved; they are marked ⚠.')}
+        ${q('Put just one person\'s hours on the rota', 'Press <i>+ usual hours</i> under their name on the Rota tab, or the button under their working hours on the Team tab.')}
+        ${q('Set up a split shift', 'On the Team tab, press <i>+ split shift</i> on the day and set the times of the second block. Each block becomes its own shift on the rota.')}
+        ${q('Show someone working in two areas', 'Tick the second area under <i>Trained to work in</i>. Each block of time then has an area box: for example studio in the morning and front of house after. Leave it on <i>Main area</i> for their usual area.')}
+        ${q('Set up a 2-week or 4-week rotation', 'On the Team tab, choose <i>2-week rotation</i> or <i>4-week rotation</i>, then pick each week and set its days and hours. Which calendar week counts as week 1 is set on the Coverage needs tab; the dot on the week buttons shows which rotation week is on screen.')}
+        ${q('Book a holiday', 'On the Team tab, press <i>+ Add time off</i> and set the first and last days. The person is left off the rota and out of the suggestions on those days, and any shift already on those days is marked ⚠.')}
+        ${q('Move someone\'s break', 'Click the shift on the rota and change the break start time. <i>Put it back in the middle</i> undoes that.')}
+        ${q('Ask for a specific treatment', 'On the Coverage needs tab, set the treatment on a Therapists period of cover. That cover then needs someone who does that treatment, and is counted separately from general cover.')}
+        ${q('Reuse last week', 'Press <i>Copy last week</i> on the Rota tab, then check the ⚠ marks for holidays and changed hours.')}
+        ${q('Print the rota', 'Press <i>Print</i> on the Rota tab. Only the grid is printed.')}
+        ${q('Send rotas to Trybe', 'On the Google Sheets tab, press <i>Add working hours to all four weeks</i>, then <i>Check against Trybe</i>. The first time it asks for a Trybe API token, which Trybe\'s tech support issues on request. Use the Playground to try it safely, or <i>Try it with a simulated Trybe</i> to see the steps without a token. Breaks are left out so no one is booked over lunch.')}
+        ${q('Move to another computer', 'Press <i>Backup</i>, download a backup file, open the app on the other computer and choose <i>Restore from a backup file</i>.')}
+        ${q('Undo a mistake such as a wrong import', 'Press <i>Backup</i> and restore a copy from the list. The app keeps a copy before every import or restore, before each update, and once a day.')}
+      </div>
+
+      <h2>Breaks</h2>
+      <p>Every continuous shift gets a break by the rules on the Coverage needs tab, placed in the middle of the shift. With the rules as they are now:</p>
+      <ul class="cols3">${ex}</ul>
+      <p class="muted">Back-to-back shifts count as one. While someone is on a break they do not count towards cover, so an uncovered lunch shows as a gap. Hours worked, and the check against contracted hours, are after breaks.</p>
+
+      <h2>Your data</h2>
+      <p>The team, rotas and settings are kept in this browser and saved as you go. Updating the app does not remove them. A copy is kept automatically before each update and once a day, and can be restored from the <i>Backup</i> button. Those copies are in the same browser, so download a backup file now and then: it is the only copy that survives clearing the browser or changing computer.</p>
+    </div>`;
+  }
+
   // ---------- render ----------
-  const VIEWS = { rota: rotaView, team: teamView, needs: needsView, capacity: capacityView, sheets: sheetsView };
+  const VIEWS = { rota: rotaView, team: teamView, needs: needsView, capacity: capacityView, sheets: sheetsView, help: helpView };
   function render() {
     const dates = D.weekDates(wk), gaps = E.gaps(wk).length;
     $('weeklabel').innerHTML = `${D.nice(dates[0])} – ${D.nice(dates[6])} ${dates[6].slice(0, 4)}<small>Rotation week ${D.rotationWeek(wk) + 1} of 4</small>`;
     document.querySelectorAll('#tabs button').forEach(b => { b.classList.toggle('on', b.dataset.tab === tab); if (b.dataset.tab === 'rota') b.innerHTML = 'Rota' + (gaps ? ` <i>${gaps}</i>` : ''); });
     const y = $('view').scrollTop;
+    hideTip();
     $('view').innerHTML = VIEWS[tab]();
     $('view').className = tab;
+    applyTips($('view'));
     $('view').scrollTop = y;
     backupStatus();
   }
@@ -387,6 +615,7 @@
 
   // ---------- actions ----------
   const ACT = {
+    goto(el) { go(el.dataset.tab); return false; },
     hours() {
       const r = E.fromHours(wk);
       toast(r.added ? `Added ${r.added} shift${r.added === 1 ? '' : 's'} from working hours.` + (r.kept ? ` ${r.kept} day${r.kept === 1 ? '' : 's'} that already had shifts ${r.kept === 1 ? 'was' : 'were'} left as ${r.kept === 1 ? 'it was' : 'they were'}.` : '') + ' Gaps in cover are shown below the rota.'
@@ -506,6 +735,9 @@
   // ---------- events ----------
   document.addEventListener('DOMContentLoaded', () => {
     D.load();
+    initTips();
+    // the first time the app opens in a browser, start with the instructions
+    try { if (!localStorage.getItem('daha.rota.helpSeen')) { tab = 'help'; localStorage.setItem('daha.rota.helpSeen', '1'); } } catch (e) { /* ignore */ }
     // ask the browser to keep this site's data even when it is short of space
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
     wk = D.mondayOf(D.today());
